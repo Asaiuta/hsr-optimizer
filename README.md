@@ -49,6 +49,18 @@ npm run preview -- --host 127.0.0.1 --port 4173
 
 Then register `scripts/automation-mcp.mts` as an MCP server.
 
+## Search performance (fork addition)
+
+The CPU and GPU search paths were reworked, with the A/B evidence kept alongside the code. The numbers below come from saved before/after builds in the local `output/` evidence tree — they compare this fork against its own earlier builds, **not** against upstream.
+
+| Change                                                               | Measured                                                          |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| GPU overflow — recursive range split, not whole-batch re-runs        | 1.34B combos on Intel gen-12lp: 289.7 s → 235.4 s (−18.7%)        |
+| CPU action pruning — skip rotation outputs the target never reads    | million-combo BASIC −49.8%, combat CD −48.6%, real default −18.2% |
+| CPU worker top-K — 16-byte index/score returns, not a 46.2 MB buffer | K=1024 −8.3%; buffer 46.2 MB → ≤16 KB                             |
+
+These are not universal gains, and the regressions were kept rather than tuned away: NVIDIA small GPU tasks ran 47–114 ms slower, and CPU K=10 about 3.5% slower. Protocols, candidate re-simulation checks and the raw reports live in [docs/dev/performance-baseline.md](docs/dev/performance-baseline.md) and its successors (Chinese).
+
 # Credits
 
 Shout outs to:
