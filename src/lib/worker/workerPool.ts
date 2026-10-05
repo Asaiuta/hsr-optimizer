@@ -110,13 +110,14 @@ export class WorkerPool {
     })
   }
 
-  cancelQueue(): void {
+  cancelQueue(workerType?: WorkerType): void {
     // Reject all queued tasks with WorkerCancelledError so callers can distinguish
     // cancellation from real errors
-    for (const task of this.queue) {
+    this.queue = this.queue.filter((task) => {
+      if (workerType !== undefined && task.input.workerType !== workerType) return true
       task.reject(new WorkerCancelledError())
-    }
-    this.queue = []
+      return false
+    })
   }
 
   terminate(): void {

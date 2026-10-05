@@ -36,7 +36,10 @@ import {
   type TeammateConditionalType,
   useOptimizerRequestStore,
 } from 'lib/stores/optimizerForm/useOptimizerRequestStore'
-import { useOptimizerDisplayStore } from 'lib/stores/optimizerUI/useOptimizerDisplayStore'
+import {
+  finishOptimizationRun,
+  useOptimizerDisplayStore,
+} from 'lib/stores/optimizerUI/useOptimizerDisplayStore'
 import { syncFormToCharacterStore } from 'lib/tabs/tabOptimizer/combo/comboDrawerUtils'
 import { OptimizerTabController } from 'lib/tabs/tabOptimizer/optimizerTabController'
 import { uuid } from 'lib/utils/miscUtils'
@@ -407,6 +410,18 @@ export function startOptimization(): void {
     return
   }
 
+  // Keep UI persistence outside the shared execution entry point.
+  setTimeout(() => persistenceService.upsertCharacterFromForm(form), 0)
+  SaveState.delayedSave()
+  submitOptimization(form)
+}
+
+/** Shared by the UI and automation. Inputs are already normalized and validated. */
+export function submitOptimization(form: Form): string {
+  Optimizer.cancel()
+  const optimizationId = uuid()
+  form = { ...form, optimizationId }
+
   // Reset all progress and timing fields to prevent stale data from previous run
   useOptimizerDisplayStore.setState({
     permutationsSearched: 0,
@@ -415,6 +430,8 @@ export function startOptimization(): void {
     optimizerEndTime: null,
     optimizerProgress: 0,
     optimizationInProgress: true,
+    optimizationId,
+    optimizationOutcome: null,
   })
 
   // A new search reassigns what result ids mean, so the previous selection is stale
@@ -424,21 +441,16 @@ export function startOptimization(): void {
   // Clear any stale post-search row filter so new results aren't filtered by a previous run's thresholds
   OptimizerTabController.clearFilterModel()
 
-  // Delay the DB save so it doesn't block the optimizer start with a characters tab re-render
-  setTimeout(() => {
-    persistenceService.upsertCharacterFromForm(form)
-  }, 0)
-  SaveState.delayedSave()
-
-  const optimizationId = uuid()
-  useOptimizerDisplayStore.getState().setOptimizationId(optimizationId)
-  form.optimizationId = optimizationId
-  form.statDisplay = useOptimizerRequestStore.getState().statDisplay
-
+  OptimizerTabController.setRows([])
   optimizerFormCache.set(optimizationId, form)
 
   console.log('Form finished', form)
 
   // Use setTimeout(0) to yield to the browser so the UI can update (loading state) before the optimizer starts
-  setTimeout(() => Optimizer.optimize(form), 0)
+  setTimeout(() => {
+    void Optimizer.optimize(form).catch((error: unknown) => {
+      finishOptimizationRun(optimizationId, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+    })
+  }, 0)
+  return optimizationId
 }

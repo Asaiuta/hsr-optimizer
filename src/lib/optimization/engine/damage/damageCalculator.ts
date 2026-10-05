@@ -1006,14 +1006,19 @@ function computeCommonMultipliers(
   hitIndex: number,
   context: OptimizerContext,
 ): void {
-  const defPen = x.getValue(StatKey.DEF_PEN, hitIndex)
-  const resPen = x.getValue(StatKey.RES_PEN, hitIndex)
+  const config = x.config
+  const a = x.a
+  const entityOffset = (config.hits[hitIndex].sourceEntityIndex ?? 0) * config.entityStride
+  const hitOffset = entityOffset + config.actionStatsLength + hitIndex * config.hitStatsLength
+  // All four stats have hit-level slots. Preserve getValue's action + hit sum.
+  const defPen = a[entityOffset + StatKey.DEF_PEN] + a[hitOffset + HKey.DEF_PEN]
+  const resPen = a[entityOffset + StatKey.RES_PEN] + a[hitOffset + HKey.RES_PEN]
 
   m.baseUniversalMulti = x.config.enemyWeaknessBroken ? 1 : 0.9
   m.defMulti = calculateDefMulti(context.enemyLevel, defPen)
   m.resMulti = 1 - Math.min(0.90, Math.max(-1.00, context.enemyDamageResistance - resPen))
-  m.vulnMulti = 1 + Math.min(2.50, Math.max(0, x.getValue(StatKey.VULNERABILITY, hitIndex)))
-  m.finalDmgMulti = 1 + x.getValue(StatKey.FINAL_DMG_BOOST, hitIndex)
+  m.vulnMulti = 1 + Math.min(2.50, Math.max(0, a[entityOffset + StatKey.VULNERABILITY] + a[hitOffset + HKey.VULNERABILITY]))
+  m.finalDmgMulti = 1 + (a[entityOffset + StatKey.FINAL_DMG_BOOST] + a[hitOffset + HKey.FINAL_DMG_BOOST])
 }
 
 function calculateInitialDamage(
@@ -1026,16 +1031,20 @@ function calculateInitialDamage(
   // This allows hits from one entity to scale off another entity's stats (e.g., Castorice's memosprite)
   const scalingEntityIndex = hit.scalingEntityIndex ?? hit.sourceEntityIndex ?? 0
 
-  const atk = x.getValue(StatKey.ATK, hitIndex, scalingEntityIndex)
-  const hp = x.getValue(StatKey.HP, hitIndex, scalingEntityIndex)
-  const def = x.getValue(StatKey.DEF, hitIndex, scalingEntityIndex)
+  const config = x.config
+  const a = x.a
+  const entityOffset = scalingEntityIndex * config.entityStride
+  const hitOffset = entityOffset + config.actionStatsLength + hitIndex * config.hitStatsLength
+  const atk = a[entityOffset + StatKey.ATK] + a[hitOffset + HKey.ATK]
+  const hp = a[entityOffset + StatKey.HP] + a[hitOffset + HKey.HP]
+  const def = a[entityOffset + StatKey.DEF] + a[hitOffset + HKey.DEF]
 
   // BE-based ATK scaling
   const critHit = hit as CritHit
   const beScaling = critHit.beScaling
   let totalAtkScaling = hit.atkScaling ?? 0
   if (beScaling != null) {
-    const be = x.getValue(StatKey.BE, hitIndex, scalingEntityIndex)
+    const be = a[entityOffset + StatKey.BE] + a[hitOffset + HKey.BE]
     const effectiveBe = critHit.beCap != null ? Math.min(critHit.beCap, be) : be
     totalAtkScaling += beScaling * effectiveBe
   }
@@ -1043,7 +1052,8 @@ function calculateInitialDamage(
   // Elation-based ATK scaling
   const elationAtkScaling = critHit.elationAtkScaling
   if (elationAtkScaling != null) {
-    const elation = x.getValue(StatKey.ELATION, hitIndex, scalingEntityIndex)
+    // ELATION is action-only; keep getValue's addition of zero.
+    const elation = a[entityOffset + StatKey.ELATION] + 0
     totalAtkScaling += elationAtkScaling * elation
   }
 
@@ -1057,18 +1067,30 @@ function calculateDefMulti(eLevel: number, defPen: number) {
 }
 
 function getCritMultiplier(x: ComputedStatsContainer, hitIndex: number): number {
-  const cr = Math.min(1, x.getValue(StatKey.CR, hitIndex) + x.getValue(StatKey.CR_BOOST, hitIndex))
-  const cd = x.getValue(StatKey.CD, hitIndex) + x.getValue(StatKey.CD_BOOST, hitIndex)
+  const config = x.config
+  const a = x.a
+  const entityOffset = (config.hits[hitIndex].sourceEntityIndex ?? 0) * config.entityStride
+  const hitOffset = entityOffset + config.actionStatsLength + hitIndex * config.hitStatsLength
+  const cr = Math.min(1, (a[entityOffset + StatKey.CR] + a[hitOffset + HKey.CR])
+    + (a[entityOffset + StatKey.CR_BOOST] + 0))
+  const cd = (a[entityOffset + StatKey.CD] + a[hitOffset + HKey.CD])
+    + (a[entityOffset + StatKey.CD_BOOST] + 0)
   return cr * (1 + cd) + (1 - cr)
 }
 
 function getAdditionalCritMultiplier(x: ComputedStatsContainer, hit: AdditionalHit, hitIndex: number): number {
+  const config = x.config
+  const a = x.a
+  const entityOffset = (config.hits[hitIndex].sourceEntityIndex ?? 0) * config.entityStride
+  const hitOffset = entityOffset + config.actionStatsLength + hitIndex * config.hitStatsLength
   const cr = hit.crOverride != null
     ? hit.crOverride
-    : Math.min(1, x.getValue(StatKey.CR, hitIndex) + x.getValue(StatKey.CR_BOOST, hitIndex))
+    : Math.min(1, (a[entityOffset + StatKey.CR] + a[hitOffset + HKey.CR])
+      + (a[entityOffset + StatKey.CR_BOOST] + 0))
   const cd = hit.cdOverride != null
     ? hit.cdOverride
-    : x.getValue(StatKey.CD, hitIndex) + x.getValue(StatKey.CD_BOOST, hitIndex)
+    : (a[entityOffset + StatKey.CD] + a[hitOffset + HKey.CD])
+      + (a[entityOffset + StatKey.CD_BOOST] + 0)
   return cr * (1 + cd) + (1 - cr)
 }
 

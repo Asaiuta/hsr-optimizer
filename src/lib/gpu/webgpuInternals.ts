@@ -1,24 +1,34 @@
 import { COMPUTE_ENGINE_GPU_EXPERIMENTAL } from 'lib/constants/constants'
-import { FixedSizeNumericMinQueue } from 'lib/dataStructures/fixedSizeMinQueue'
 import { generateWgsl } from 'lib/gpu/injection/generateWgsl'
+import { GpuBufferLease } from 'lib/gpu/webgpuBufferPool'
 import {
   buildWorkgroupAssignments,
   computeTupleParams,
   type FullSizes,
   generateParamsMatrix,
   mergeRelicsIntoArray,
+  packRankedRelics,
   serializeAssignments,
   type WorkgroupEntry,
 } from 'lib/gpu/webgpuDataTransform'
 import { uniformCompatible } from 'lib/gpu/webgpuDevice'
+import { getComputePipeline } from 'lib/gpu/webgpuPipelineCache'
 import {
   type GpuExecutionContext,
   type RelicsByPart,
 } from 'lib/gpu/webgpuTypes'
 import {
+  PARTS,
+  qualifyShieldBound,
+} from 'lib/optimization/pruning/shieldBound'
+import {
   buildPerSlotSetRanges,
   enumerateValidQuadsD4,
 } from 'lib/optimization/relicSetSolver'
+import {
+  createResultTieOrder,
+  OptimizerResultQueue,
+} from 'lib/optimization/resultTieOrder'
 import { bitpackBooleanArray } from 'lib/optimization/setSolutionBitset'
 import {
   OrnamentSetToIndex,
@@ -29,6 +39,19 @@ import {
 import { type Form } from 'types/form'
 import { type OptimizerContext } from 'types/optimizer'
 import { type Relic } from 'types/relic'
+
+export function getCompactResultLimit(resultsLimit: number, tupleMode: boolean, debug: boolean): number {
+  const capacity = resultsLimit * (tupleMode ? 64 : 4)
+  // Small K still needs a useful seed and enough room to avoid repeated readbacks.
+  // Tuple and debug layouts retain their existing capacity contracts.
+  return tupleMode || debug ? capacity : Math.max(4096, capacity)
+}
+
+export function shouldConsiderGpuPruning(permutations: number, dispatchSize: number, targetIterations: number): boolean {
+  // Power-of-two workgroup rounding normally produces targetIterations to twice
+  // that many passes. Keep these short searches on the batched exhaustive path.
+  return Math.ceil(permutations / dispatchSize) > 2 * targetIterations
+}
 
 export async function initializeGpuPipeline(
   device: GPUDevice,
@@ -72,7 +95,7 @@ export async function initializeGpuPipeline(
   const COMPACT_OVERFLOW_FACTOR = TUPLE_MODE ? 64 : 4
 
   // Max compact entries per dispatch before overflow triggers revisit
-  const COMPACT_LIMIT = RESULTS_LIMIT * COMPACT_OVERFLOW_FACTOR
+  const COMPACT_LIMIT = getCompactResultLimit(RESULTS_LIMIT, TUPLE_MODE, DEBUG)
 
   const wgsl = generateWgsl(context, request, relics, {
     WORKGROUP_SIZE,
@@ -84,184 +107,206 @@ export async function initializeGpuPipeline(
     TUPLE_MODE,
   })
 
-  const computePipeline = await generatePipeline(device, wgsl)
+  // A capacity floor must not make previously unaudited K values match the
+  // shield fingerprint. Large searches still require the full original contract.
+  const shieldBound = COMPACT_LIMIT === RESULTS_LIMIT * COMPACT_OVERFLOW_FACTOR
+      && shouldConsiderGpuPruning(permutations, BLOCK_SIZE * CYCLES_PER_INVOCATION, TARGET_ITERATIONS)
+      && !DEBUG && !TUPLE_MODE && !request.ornamentSets?.length && request.characterId === '8004' && request.resultSort === 'TALENT_SHIELD'
+    ? await qualifyShieldBound(wgsl, new Float32Array(mergeRelicsIntoArray(relics)), context.precomputedStatsData!, PARTS.map((part) => relics[part].length))
+    : undefined
+  const computePipeline = await getComputePipeline(device, wgsl)
 
-  // Params buffer: 16 bytes for tuple mode (threshold + batchOffset + padding), 32 bytes for naive (8 floats)
-  const paramsMatrixBufferSize = TUPLE_MODE ? 16 : Float32Array.BYTES_PER_ELEMENT * 8
-  // DEBUG writes one full stats container per invocation. Release mode does not use this buffer.
-  const resultMatrixBufferSize = getResultMatrixBufferSize(DEBUG, BLOCK_SIZE, context.maxContainerArrayLength)
-  const resultMatrixBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
-    device.createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
-  ]
-  const paramsMatrixBuffer = device.createBuffer({
-    size: paramsMatrixBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-  })
+  const bufferLease = new GpuBufferLease(device, !DEBUG)
+  const createBuffer = bufferLease.createBuffer
+  try {
+    // Original dispatch fields followed by 32 bytes for the complete tie threshold.
+    const paramsMatrixBufferSize = TUPLE_MODE ? 48 : 64
+    // DEBUG writes one full stats container per invocation. Release mode does not use this buffer.
+    const resultMatrixBufferSize = getResultMatrixBufferSize(DEBUG, BLOCK_SIZE, context.maxContainerArrayLength)
+    const resultMatrixBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+      createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+    ]
+    const paramsMatrixBuffer = createBuffer({
+      size: paramsMatrixBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    })
 
-  const hasOrnamentFilter = (request.ornamentSets?.length ?? 0) > 0
+    const hasOrnamentFilter = (request.ornamentSets?.length ?? 0) > 0
 
-  // Sorts relics in-place by set — required for contiguous set ranges in tuple dispatch.
-  // Mutates the caller's arrays; outputResults reads from the same sorted references.
-  if (TUPLE_MODE) {
-    const byRelicSet = (a: Relic, b: Relic) => RelicSetToIndex[a.set as SetsRelics] - RelicSetToIndex[b.set as SetsRelics]
-    const byOrnamentSet = (a: Relic, b: Relic) => OrnamentSetToIndex[a.set as SetsOrnaments] - OrnamentSetToIndex[b.set as SetsOrnaments]
+    // Sorts relics in-place by set — required for contiguous set ranges in tuple dispatch.
+    // Mutates the caller's arrays; outputResults reads from the same sorted references.
+    if (TUPLE_MODE) {
+      const byRelicSet = (a: Relic, b: Relic) => RelicSetToIndex[a.set as SetsRelics] - RelicSetToIndex[b.set as SetsRelics]
+      const byOrnamentSet = (a: Relic, b: Relic) => OrnamentSetToIndex[a.set as SetsOrnaments] - OrnamentSetToIndex[b.set as SetsOrnaments]
 
-    relics.Head.sort(byRelicSet)
-    relics.Hands.sort(byRelicSet)
-    relics.Body.sort(byRelicSet)
-    relics.Feet.sort(byRelicSet)
-    relics.PlanarSphere.sort(byOrnamentSet)
-    relics.LinkRope.sort(byOrnamentSet)
-  }
-
-  // Build tuple assignments for set-filtered dispatch
-  let assignmentBuffer: GPUBuffer | null = null
-  let assignments: WorkgroupEntry[] = []
-
-  if (TUPLE_MODE) {
-    const ranges = buildPerSlotSetRanges(relics)
-    const quads = enumerateValidQuadsD4(relicSetSolutions, ranges)
-    const fullSizes: FullSizes = {
-      pSize: relics.PlanarSphere.length,
-      lSize: relics.LinkRope.length,
+      relics.Head.sort(byRelicSet)
+      relics.Hands.sort(byRelicSet)
+      relics.Body.sort(byRelicSet)
+      relics.Feet.sort(byRelicSet)
+      relics.PlanarSphere.sort(byOrnamentSet)
+      relics.LinkRope.sort(byOrnamentSet)
     }
-    const wgCapacity = WORKGROUP_SIZE * CYCLES_PER_INVOCATION
-    const tupleParams = quads.map((q) => computeTupleParams(q, ranges))
-    assignments = buildWorkgroupAssignments(tupleParams, fullSizes, wgCapacity)
-    const serialized = serializeAssignments(assignments)
 
-    assignmentBuffer = device.createBuffer({
-      mappedAtCreation: true,
-      size: serialized.byteLength,
-      usage: GPUBufferUsage.STORAGE,
+    // Build tuple assignments for set-filtered dispatch
+    let assignmentBuffer: GPUBuffer | null = null
+    let assignments: WorkgroupEntry[] = []
+
+    if (TUPLE_MODE) {
+      const ranges = buildPerSlotSetRanges(relics)
+      const quads = enumerateValidQuadsD4(relicSetSolutions, ranges)
+      const fullSizes: FullSizes = {
+        pSize: relics.PlanarSphere.length,
+        lSize: relics.LinkRope.length,
+      }
+      const wgCapacity = WORKGROUP_SIZE * CYCLES_PER_INVOCATION
+      const tupleParams = quads.map((q) => computeTupleParams(q, ranges))
+      assignments = buildWorkgroupAssignments(tupleParams, fullSizes, wgCapacity)
+      const serialized = serializeAssignments(assignments)
+
+      assignmentBuffer = createGpuBuffer(device, createBuffer, new Uint32Array(serialized), GPUBufferUsage.STORAGE)
+    }
+
+    const mergedRelics = new Float32Array(mergeRelicsIntoArray(relics))
+    const tieOrder = createResultTieOrder(relics)
+    const relicsMatrixBuffer = createGpuBuffer(
+      device,
+      createBuffer,
+      DEBUG ? mergedRelics : packRankedRelics(mergedRelics, tieOrder.packedRanks),
+      GPUBufferUsage.STORAGE,
+    )
+    const relicSetSolutionsMatrixBuffer = hasRelicFilter
+      ? createGpuBuffer(device, createBuffer, new Int32Array(bitpackBooleanArray(relicSetSolutions)), GPUBufferUsage.STORAGE)
+      : null
+    const ornamentSetSolutionsMatrixBuffer = hasOrnamentFilter
+      ? createGpuBuffer(device, createBuffer, new Int32Array(bitpackBooleanArray(ornamentSetSolutions)), GPUBufferUsage.STORAGE)
+      : null
+    const precomputedStatsBuffer = createGpuBuffer(
+      device,
+      createBuffer,
+      context.precomputedStatsData!,
+      uniformCompatible() ? GPUBufferUsage.UNIFORM : GPUBufferUsage.STORAGE,
+    )
+
+    const bindGroup0Entries: GPUBindGroupEntry[] = [
+      { binding: 0, resource: { buffer: paramsMatrixBuffer } },
+    ]
+    if (TUPLE_MODE && assignmentBuffer) {
+      bindGroup0Entries.push({ binding: 1, resource: { buffer: assignmentBuffer } })
+    }
+    const bindGroup0 = device.createBindGroup({
+      layout: computePipeline.getBindGroupLayout(0),
+      entries: bindGroup0Entries,
     })
-    new Uint32Array(assignmentBuffer.getMappedRange()).set(new Uint32Array(serialized))
-    assignmentBuffer.unmap()
-  }
 
-  const mergedRelics = mergeRelicsIntoArray(relics)
-
-  const relicsMatrixBuffer = createGpuBuffer(device, new Float32Array(mergedRelics), GPUBufferUsage.STORAGE)
-  const relicSetSolutionsMatrixBuffer = hasRelicFilter
-    ? createGpuBuffer(device, new Int32Array(bitpackBooleanArray(relicSetSolutions)), GPUBufferUsage.STORAGE, true, true)
-    : null
-  const ornamentSetSolutionsMatrixBuffer = hasOrnamentFilter
-    ? createGpuBuffer(device, new Int32Array(bitpackBooleanArray(ornamentSetSolutions)), GPUBufferUsage.STORAGE, true, true)
-    : null
-  const precomputedStatsBuffer = createGpuBuffer(device, context.precomputedStatsData!, uniformCompatible() ? GPUBufferUsage.UNIFORM : GPUBufferUsage.STORAGE)
-
-  const bindGroup0Entries: GPUBindGroupEntry[] = [
-    { binding: 0, resource: { buffer: paramsMatrixBuffer } },
-  ]
-  if (TUPLE_MODE && assignmentBuffer) {
-    bindGroup0Entries.push({ binding: 1, resource: { buffer: assignmentBuffer } })
-  }
-  const bindGroup0 = device.createBindGroup({
-    layout: computePipeline.getBindGroupLayout(0),
-    entries: bindGroup0Entries,
-  })
-
-  const bindGroup1 = device.createBindGroup({
-    layout: computePipeline.getBindGroupLayout(1),
-    entries: [
-      { binding: 0, resource: { buffer: relicsMatrixBuffer } },
-      ...ornamentSetSolutionsMatrixBuffer ? [{ binding: 1, resource: { buffer: ornamentSetSolutionsMatrixBuffer } }] : [],
-      ...relicSetSolutionsMatrixBuffer ? [{ binding: 2, resource: { buffer: relicSetSolutionsMatrixBuffer } }] : [],
-      { binding: 3, resource: { buffer: precomputedStatsBuffer } },
-    ],
-  })
-
-  // Atomic compaction buffers
-  const COMPACT_ENTRY_BYTES = 8 // CompactEntry: u32 index (4B) + f32 value (4B)
-  const compactResultsBufferSize = COMPACT_LIMIT * COMPACT_ENTRY_BYTES
-
-  const compactCountBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
-    device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
-  ]
-  const validCountBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
-    device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
-  ]
-  const compactResultsBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: compactResultsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
-    device.createBuffer({ size: compactResultsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
-  ]
-
-  // Merged read buffer: [compactCount(4B) | CompactEntry[](N*8B) | validCount(4B)]
-  const compactReadBufferSize = 4 + compactResultsBufferSize + 4
-  const compactReadBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: compactReadBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-    device.createBuffer({ size: compactReadBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-  ]
-
-  const bindGroups2: [GPUBindGroup, GPUBindGroup] = [0, 1].map((i) =>
-    device.createBindGroup({
-      layout: computePipeline.getBindGroupLayout(2),
-      entries: getResultBindGroupEntries(
-        DEBUG,
-        resultMatrixBuffers[i],
-        compactCountBuffers[i],
-        compactResultsBuffers[i],
-        validCountBuffers[i],
-      ),
+    const bindGroup1 = device.createBindGroup({
+      layout: computePipeline.getBindGroupLayout(1),
+      entries: [
+        { binding: 0, resource: { buffer: relicsMatrixBuffer } },
+        ...ornamentSetSolutionsMatrixBuffer ? [{ binding: 1, resource: { buffer: ornamentSetSolutionsMatrixBuffer } }] : [],
+        ...relicSetSolutionsMatrixBuffer ? [{ binding: 2, resource: { buffer: relicSetSolutionsMatrixBuffer } }] : [],
+        { binding: 3, resource: { buffer: precomputedStatsBuffer } },
+      ],
     })
-  ) as [GPUBindGroup, GPUBindGroup]
 
-  const gpuReadBuffers: [GPUBuffer, GPUBuffer] = [
-    device.createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-    device.createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-  ]
+    // Atomic compaction buffers
+    const COMPACT_ENTRY_BYTES = 8 // CompactEntry: u32 index (4B) + f32 value (4B)
+    const compactResultsBufferSize = COMPACT_LIMIT * COMPACT_ENTRY_BYTES
 
-  const iterations = Math.ceil(permutations / BLOCK_SIZE / CYCLES_PER_INVOCATION)
-  const resultsQueue = new FixedSizeNumericMinQueue(RESULTS_LIMIT)
+    const compactCountBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
+      createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
+    ]
+    const validCountBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
+      createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
+    ]
+    const compactResultsBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: compactResultsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+      createBuffer({ size: compactResultsBufferSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+    ]
 
-  return {
-    WORKGROUP_SIZE,
-    NUM_WORKGROUPS,
-    BLOCK_SIZE,
-    CYCLES_PER_INVOCATION,
-    RESULTS_LIMIT,
-    DEBUG,
+    // Merged read buffer: [compactCount(4B) | CompactEntry[](N*8B) | validCount(4B)]
+    const compactReadBufferSize = 4 + compactResultsBufferSize + 4
+    const compactReadBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: compactReadBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+      createBuffer({ size: compactReadBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+    ]
 
-    request,
-    context,
+    const bindGroups2: [GPUBindGroup, GPUBindGroup] = [0, 1].map((i) =>
+      device.createBindGroup({
+        layout: computePipeline.getBindGroupLayout(2),
+        entries: getResultBindGroupEntries(
+          DEBUG,
+          resultMatrixBuffers[i],
+          compactCountBuffers[i],
+          compactResultsBuffers[i],
+          validCountBuffers[i],
+        ),
+      })
+    ) as [GPUBindGroup, GPUBindGroup]
 
-    paramsMatrixBufferSize,
-    resultMatrixBufferSize,
-    permutations,
-    iterations,
-    relics,
-    resultsQueue,
-    cancelled: false,
-    computeEngine,
+    const gpuReadBuffers: [GPUBuffer, GPUBuffer] = [
+      createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+      createBuffer({ size: resultMatrixBufferSize, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+    ]
 
-    device,
-    computePipeline,
-    bindGroup0,
-    bindGroup1,
-    bindGroups2,
-    paramsMatrixBuffer,
-    resultMatrixBuffers,
-    relicsMatrixBuffer,
-    relicSetSolutionsMatrixBuffer,
-    ornamentSetSolutionsMatrixBuffer,
-    precomputedStatsBuffer,
+    const iterations = Math.ceil(permutations / BLOCK_SIZE / CYCLES_PER_INVOCATION)
+    const resultsQueue = new OptimizerResultQueue(RESULTS_LIMIT, tieOrder)
 
-    gpuReadBuffers,
+    return {
+      bufferLease,
+      WORKGROUP_SIZE,
+      NUM_WORKGROUPS,
+      BLOCK_SIZE,
+      CYCLES_PER_INVOCATION,
+      RESULTS_LIMIT,
+      DEBUG,
 
-    TUPLE_MODE,
-    assignmentBuffer,
-    assignments,
+      request,
+      context,
 
-    COMPACT_LIMIT,
-    compactResultsBufferSize,
-    compactReadBufferSize,
-    compactCountBuffers,
-    compactResultsBuffers,
-    compactReadBuffers,
-    validCountBuffers,
+      paramsMatrixBufferSize,
+      resultMatrixBufferSize,
+      permutations,
+      iterations,
+      relics,
+      resultsQueue,
+      tieOrder,
+      shieldBound,
+      cancelled: false,
+      computeEngine,
+
+      device,
+      computePipeline,
+      bindGroup0,
+      bindGroup1,
+      bindGroups2,
+      paramsMatrixBuffer,
+      resultMatrixBuffers,
+      relicsMatrixBuffer,
+      relicSetSolutionsMatrixBuffer,
+      ornamentSetSolutionsMatrixBuffer,
+      precomputedStatsBuffer,
+
+      gpuReadBuffers,
+
+      TUPLE_MODE,
+      assignmentBuffer,
+      assignments,
+
+      COMPACT_LIMIT,
+      compactResultsBufferSize,
+      compactReadBufferSize,
+      compactCountBuffers,
+      compactResultsBuffers,
+      compactReadBuffers,
+      validCountBuffers,
+    }
+  } catch (error) {
+    // A shared device survives failed jobs, so release partially initialized buffers too.
+    bufferLease.release()
+    throw error
   }
 }
 
@@ -311,9 +356,15 @@ export function submitGpuDispatch(gpuContext: GpuExecutionContext, paramsData: A
   device.queue.submit([commandEncoder.finish()])
 }
 
-export function generateExecutionPass(gpuContext: GpuExecutionContext, offset: number, bufferIndex: number = 0): ExecutionPassResult {
-  const paramsData = generateParamsMatrix(offset, gpuContext.relics, gpuContext)
-  submitGpuDispatch(gpuContext, paramsData, gpuContext.NUM_WORKGROUPS, bufferIndex)
+export function generateExecutionPass(
+  gpuContext: GpuExecutionContext,
+  offset: number,
+  bufferIndex = 0,
+  rangeSize = gpuContext.BLOCK_SIZE * gpuContext.CYCLES_PER_INVOCATION,
+): ExecutionPassResult {
+  const paramsData = generateParamsMatrix(offset, gpuContext.relics, gpuContext, rangeSize)
+  const workgroups = Math.ceil(rangeSize / (gpuContext.WORKGROUP_SIZE * gpuContext.CYCLES_PER_INVOCATION))
+  submitGpuDispatch(gpuContext, paramsData, workgroups, bufferIndex)
   return {
     gpuReadBuffer: gpuContext.gpuReadBuffers[bufferIndex],
     compactReadBuffer: gpuContext.compactReadBuffers[bufferIndex],
@@ -343,56 +394,22 @@ export function getResultBindGroupEntries(
     ]
 }
 
-async function generatePipeline(device: GPUDevice, wgsl: string) {
-  const shaderModule = device.createShaderModule({
-    code: wgsl,
-  })
-
-  return device.createComputePipelineAsync({
-    layout: 'auto',
-    compute: {
-      module: shaderModule,
-      entryPoint: 'main',
-    },
-  })
-}
-
 function createGpuBuffer(
   device: GPUDevice,
-  matrix: Int32Array | Float32Array,
+  createBuffer: (descriptor: GPUBufferDescriptor) => GPUBuffer,
+  matrix: Int32Array | Uint32Array | Float32Array,
   usage: GPUBufferUsageFlags,
-  mapped = true,
-  int = false,
 ) {
-  const gpuBuffer = device.createBuffer({
-    mappedAtCreation: mapped,
+  const gpuBuffer = createBuffer({
     size: matrix.byteLength,
-    usage: usage,
+    usage: usage | GPUBufferUsage.COPY_DST,
   })
 
-  const arrayBuffer = gpuBuffer.getMappedRange()
-  if (int) {
-    new Uint32Array(arrayBuffer).set(matrix)
-  } else {
-    new Float32Array(arrayBuffer).set(matrix)
-  }
-  gpuBuffer.unmap()
+  device.queue.writeBuffer(gpuBuffer, 0, matrix.buffer, matrix.byteOffset, matrix.byteLength)
 
   return gpuBuffer
 }
 
 export function destroyPipeline(gpuContext: GpuExecutionContext) {
-  gpuContext.resultMatrixBuffers.forEach((b) => b.destroy())
-  gpuContext.gpuReadBuffers.forEach((b) => b.destroy())
-  gpuContext.paramsMatrixBuffer.destroy()
-  gpuContext.relicsMatrixBuffer.destroy()
-  gpuContext.precomputedStatsBuffer.destroy()
-  gpuContext.relicSetSolutionsMatrixBuffer?.destroy()
-  gpuContext.ornamentSetSolutionsMatrixBuffer?.destroy()
-  gpuContext.assignmentBuffer?.destroy()
-
-  gpuContext.compactCountBuffers.forEach((b) => b.destroy())
-  gpuContext.compactResultsBuffers.forEach((b) => b.destroy())
-  gpuContext.compactReadBuffers.forEach((b) => b.destroy())
-  gpuContext.validCountBuffers.forEach((b) => b.destroy())
+  gpuContext.bufferLease.release()
 }

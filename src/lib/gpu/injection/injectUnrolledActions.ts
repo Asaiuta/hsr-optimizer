@@ -7,6 +7,7 @@ import {
   generateBasicStatExpression,
   getDisplayEntityIndex,
 } from 'lib/gpu/injection/displayStats'
+import { getFilterBounds } from 'lib/gpu/injection/gpuActionPlan'
 import {
   containerActionVal,
   getActionIndex,
@@ -31,10 +32,7 @@ import {
 import { matchesTargetTag } from 'lib/optimization/engine/container/gpuBuffBuilder'
 import { getDamageFunction } from 'lib/optimization/engine/damage/damageCalculator'
 import { AbilityMeta } from 'lib/optimization/rotation/turnAbilityConfig'
-import type {
-  SortOptionKey,
-  SortOptionProperties,
-} from 'lib/optimization/sortOptions'
+import type { SortOptionKey } from 'lib/optimization/sortOptions'
 import { SortOption } from 'lib/optimization/sortOptions'
 import {
   generateSetCombatWgsl,
@@ -69,10 +67,7 @@ function generateUnrolledActions(request: Form, context: OptimizerContext, gpuPa
   const defaultActionsRecordBuff = context.defaultActions.some(recordsBuffOutput)
   const displayActionIndex = context.defaultActions.length - 1
   const displayFilters = generateCombatStatFilters(request, context, displayActionIndex)
-  const abilitySortIndex = gpuParams.DEBUG ? -1 : getAbilitySortCompletionIndex(request, context)
-  const abilitySortCompletionIndex = displayFilters && abilitySortIndex >= 0
-    ? Math.max(abilitySortIndex, displayActionIndex)
-    : abilitySortIndex
+  const completionIndex = context.shaderVariables.actionLength - 1
 
   for (let i = 0; i < context.defaultActions.length; i++) {
     const action = context.defaultActions[i]
@@ -86,7 +81,7 @@ function generateUnrolledActions(request: Form, context: OptimizerContext, gpuPa
     }
 
     // Apply rating filters once every required action is calculated.
-    if (i === abilitySortCompletionIndex) {
+    if (!gpuParams.DEBUG && i === completionIndex) {
       calls += generateRatingFilters(request, context)
       calls += generateSortOptionReturn(request, context, displayActionIndex)
       calls += '    continue;\n'
@@ -130,30 +125,6 @@ function generateUnrolledActions(request: Form, context: OptimizerContext, gpuPa
   }
 
   return { calls, functions }
-}
-
-function getAbilitySortCompletionIndex(request: Form, context: OptimizerContext): number {
-  const sortOption = SortOption[request.resultSort!]
-  if (
-    !sortOption?.isComputedRating
-    || sortOption.statKey != null
-    || sortOption.globalRegisterIndex != null
-  ) {
-    return -1
-  }
-
-  let completionIndex = context.defaultActions.findIndex((action) => action.actionName === sortOption.key)
-  if (completionIndex < 0) return -1
-
-  for (const filterSortOption of Object.values(SortOption)) {
-    const bounds = getRatingFilterBounds(request, filterSortOption)
-    if (!bounds || (!bounds.hasMin && !bounds.hasMax)) continue
-
-    const actionIndex = context.defaultActions.findIndex((action) => action.actionName === filterSortOption.key)
-    completionIndex = Math.max(completionIndex, actionIndex)
-  }
-
-  return completionIndex
 }
 
 function recordsBuffOutput(action: OptimizerAction): boolean {
@@ -200,7 +171,7 @@ function generateRatingFilters(request: Form, context: OptimizerContext): string
   const conditions: string[] = []
 
   for (const sortOption of Object.values(SortOption)) {
-    const bounds = getRatingFilterBounds(request, sortOption)
+    const bounds = getFilterBounds(request, sortOption)
     if (!bounds || (!bounds.hasMin && !bounds.hasMax)) continue
 
     const actionIndex = context.defaultActions.findIndex((a) => a.actionName === sortOption.key)
@@ -220,17 +191,6 @@ function generateRatingFilters(request: Form, context: OptimizerContext): string
       continue;
     }
 `
-}
-
-function getRatingFilterBounds(request: Form, sortOption: SortOptionProperties) {
-  if (!sortOption.minFilterKey || !sortOption.maxFilterKey) return null
-
-  const minVal = request[sortOption.minFilterKey as keyof Form] as number
-  const maxVal = request[sortOption.maxFilterKey as keyof Form] as number
-  return {
-    hasMin: minVal > 0,
-    hasMax: maxVal < Constants.MAX_INT,
-  }
 }
 
 /**
@@ -289,12 +249,12 @@ function generateSortOptionReturn(request: Form, context: OptimizerContext, disp
 
     return `
     if (statDisplay == 1) {
-      if (${basicSortValue} > threshold) {
+      if (keepResult(${basicSortValue}, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult(basicSortValue)}
       }
     } else {
       let sortValue = ${container}[${statIndex}]${boostExpr};
-      if (sortValue > threshold) {
+      if (keepResult(sortValue, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult('sortValue')}
       }
     }
@@ -303,7 +263,7 @@ ${writeCompactResult('sortValue')}
 
   if (sortKey === SortOption.COMBO.key) {
     return `
-    if (comboDmg > threshold) {
+    if (keepResult(comboDmg, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult('comboDmg')}
     }
 `
@@ -311,7 +271,7 @@ ${writeCompactResult('comboDmg')}
 
   if (sortKey === SortOption.COMBO_HEAL.key) {
     return `
-    if (comboHeal > threshold) {
+    if (keepResult(comboHeal, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult('comboHeal')}
     }
 `
@@ -319,7 +279,7 @@ ${writeCompactResult('comboHeal')}
 
   if (sortKey === SortOption.COMBO_SHIELD.key) {
     return `
-    if (comboShield > threshold) {
+    if (keepResult(comboShield, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult('comboShield')}
     }
 `
@@ -327,7 +287,7 @@ ${writeCompactResult('comboShield')}
 
   if (sortKey === SortOption.COMBO_BUFF.key) {
     return `
-    if (comboBuff > threshold) {
+    if (keepResult(comboBuff, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult('comboBuff')}
     }
 `
@@ -337,7 +297,7 @@ ${writeCompactResult('comboBuff')}
     const displayEntityIndex = getDisplayEntityIndex(request, config)
     const ehpIndex = getActionIndex(displayEntityIndex, AKey.EHP, config)
     return `
-    if (${container}[${ehpIndex}] > threshold) {
+    if (keepResult(${container}[${ehpIndex}], curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult(`${container}[${ehpIndex}]`)}
     }
 `
@@ -350,7 +310,7 @@ ${writeCompactResult(`${container}[${ehpIndex}]`)}
 
   if (matchingIndex >= 0) {
     return `
-    if (dmg${matchingIndex} > threshold) {
+    if (keepResult(dmg${matchingIndex}, curH, curG, curB, curF, curP, curL)) {
 ${writeCompactResult(`dmg${matchingIndex}`)}
     }
 `

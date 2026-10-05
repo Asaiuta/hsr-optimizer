@@ -1,8 +1,9 @@
 import type { ComputedStatsContainer } from 'lib/optimization/engine/container/computedStatsContainer'
-import { formatOptimizerDisplayData } from 'lib/optimization/optimizer'
+import { formatOptimizerDisplayData } from 'lib/optimization/optimizerDisplayData'
+import { useOptimizerDisplayStore } from 'lib/stores/optimizerUI/useOptimizerDisplayStore'
 
 export function transformOptimizerDisplayData(x: ComputedStatsContainer, key?: string) {
-  const optimizerDisplayData = formatOptimizerDisplayData(x)
+  const optimizerDisplayData = formatOptimizerDisplayData(x, useOptimizerDisplayStore.getState().context)
 
   if (key) {
     // For optimizer grid syncing with sim table

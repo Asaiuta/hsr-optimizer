@@ -1,12 +1,8 @@
-import {
-  Stats,
-  type StatsValues,
-} from 'lib/constants/constants'
+import { Stats } from 'lib/constants/constants'
 import { evaluateConditional } from 'lib/gpu/conditionals/dynamicConditionals'
 import {
   BasicKey,
   type BasicStatsArray,
-  BasicStatToKey,
 } from 'lib/optimization/basicStatsArray'
 import { StatKey } from 'lib/optimization/engine/config/keys'
 import { TargetTag } from 'lib/optimization/engine/config/tag'
@@ -54,30 +50,30 @@ export function calculateElementalStats(c: BasicStatsArray, context: OptimizerCo
   a[BasicKey.ELEMENTAL_DMG] = 0
   switch (context.elementalDamageType) {
     case Stats.Physical_DMG:
-      a[BasicKey.PHYSICAL_DMG_BOOST] = sumPercentStat(Stats.Physical_DMG, base, lc, trace, c, 0)
+      a[BasicKey.PHYSICAL_DMG_BOOST] = base[Stats.Physical_DMG] + lc[Stats.Physical_DMG] + a[BasicKey.PHYSICAL_DMG_BOOST] + trace[Stats.Physical_DMG] + 0
       break
     case Stats.Fire_DMG:
-      a[BasicKey.FIRE_DMG_BOOST] = sumPercentStat(Stats.Fire_DMG, base, lc, trace, c, 0)
+      a[BasicKey.FIRE_DMG_BOOST] = base[Stats.Fire_DMG] + lc[Stats.Fire_DMG] + a[BasicKey.FIRE_DMG_BOOST] + trace[Stats.Fire_DMG] + 0
       break
     case Stats.Ice_DMG:
-      a[BasicKey.ICE_DMG_BOOST] = sumPercentStat(Stats.Ice_DMG, base, lc, trace, c, 0)
+      a[BasicKey.ICE_DMG_BOOST] = base[Stats.Ice_DMG] + lc[Stats.Ice_DMG] + a[BasicKey.ICE_DMG_BOOST] + trace[Stats.Ice_DMG] + 0
       break
     case Stats.Lightning_DMG:
-      a[BasicKey.LIGHTNING_DMG_BOOST] = sumPercentStat(Stats.Lightning_DMG, base, lc, trace, c, 0)
+      a[BasicKey.LIGHTNING_DMG_BOOST] = base[Stats.Lightning_DMG] + lc[Stats.Lightning_DMG] + a[BasicKey.LIGHTNING_DMG_BOOST] + trace[Stats.Lightning_DMG] + 0
       break
     case Stats.Wind_DMG:
-      a[BasicKey.WIND_DMG_BOOST] = sumPercentStat(Stats.Wind_DMG, base, lc, trace, c, 0)
+      a[BasicKey.WIND_DMG_BOOST] = base[Stats.Wind_DMG] + lc[Stats.Wind_DMG] + a[BasicKey.WIND_DMG_BOOST] + trace[Stats.Wind_DMG] + 0
       break
     case Stats.Quantum_DMG:
-      a[BasicKey.QUANTUM_DMG_BOOST] = sumPercentStat(Stats.Quantum_DMG, base, lc, trace, c, 0)
+      a[BasicKey.QUANTUM_DMG_BOOST] = base[Stats.Quantum_DMG] + lc[Stats.Quantum_DMG] + a[BasicKey.QUANTUM_DMG_BOOST] + trace[Stats.Quantum_DMG] + 0
       break
     case Stats.Imaginary_DMG:
-      a[BasicKey.IMAGINARY_DMG_BOOST] = sumPercentStat(Stats.Imaginary_DMG, base, lc, trace, c, 0)
+      a[BasicKey.IMAGINARY_DMG_BOOST] = base[Stats.Imaginary_DMG] + lc[Stats.Imaginary_DMG] + a[BasicKey.IMAGINARY_DMG_BOOST] + trace[Stats.Imaginary_DMG] + 0
       break
   }
 
   // Elation DMG is calculated independently of character element - it comes from traces/LC only (not relics)
-  a[BasicKey.ELATION] = sumPercentStat(Stats.Elation, base, lc, trace, c, 0)
+  a[BasicKey.ELATION] = base[Stats.Elation] + lc[Stats.Elation] + a[BasicKey.ELATION] + trace[Stats.Elation] + 0
 }
 
 export function calculateBaseStats(c: BasicStatsArray, context: OptimizerContext) {
@@ -86,17 +82,19 @@ export function calculateBaseStats(c: BasicStatsArray, context: OptimizerContext
   const trace = context.characterStatsBreakdown.traces
   const a = c.a
 
-  a[BasicKey.SPD] = sumFlatStat(Stats.SPD, Stats.SPD_P, context.baseSPD, lc, trace, c, 0)
-  a[BasicKey.HP] = sumFlatStat(Stats.HP, Stats.HP_P, context.baseHP, lc, trace, c, 0)
-  a[BasicKey.ATK] = sumFlatStat(Stats.ATK, Stats.ATK_P, context.baseATK, lc, trace, c, 0)
-  a[BasicKey.DEF] = sumFlatStat(Stats.DEF, Stats.DEF_P, context.baseDEF, lc, trace, c, 0)
-  a[BasicKey.CR] = sumPercentStat(Stats.CR, base, lc, trace, c, 0)
-  a[BasicKey.CD] = sumPercentStat(Stats.CD, base, lc, trace, c, 0)
-  a[BasicKey.EHR] = sumPercentStat(Stats.EHR, base, lc, trace, c, 0)
-  a[BasicKey.RES] = sumPercentStat(Stats.RES, base, lc, trace, c, 0)
-  a[BasicKey.BE] = sumPercentStat(Stats.BE, base, lc, trace, c, 0)
-  a[BasicKey.ERR] = sumPercentStat(Stats.ERR, base, lc, trace, c, 0)
-  a[BasicKey.OHB] = sumPercentStat(Stats.OHB, base, lc, trace, c, 0)
+  // Fixed stat keys avoid generic string-key dispatch. Keep the original
+  // addition order (including zero terms) for float32 score parity.
+  a[BasicKey.SPD] = context.baseSPD * (1 + 0 + a[BasicKey.SPD_P] + trace[Stats.SPD_P] + lc[Stats.SPD_P]) + a[BasicKey.SPD] + trace[Stats.SPD]
+  a[BasicKey.HP] = context.baseHP * (1 + 0 + a[BasicKey.HP_P] + trace[Stats.HP_P] + lc[Stats.HP_P]) + a[BasicKey.HP] + trace[Stats.HP]
+  a[BasicKey.ATK] = context.baseATK * (1 + 0 + a[BasicKey.ATK_P] + trace[Stats.ATK_P] + lc[Stats.ATK_P]) + a[BasicKey.ATK] + trace[Stats.ATK]
+  a[BasicKey.DEF] = context.baseDEF * (1 + 0 + a[BasicKey.DEF_P] + trace[Stats.DEF_P] + lc[Stats.DEF_P]) + a[BasicKey.DEF] + trace[Stats.DEF]
+  a[BasicKey.CR] = base[Stats.CR] + lc[Stats.CR] + a[BasicKey.CR] + trace[Stats.CR] + 0
+  a[BasicKey.CD] = base[Stats.CD] + lc[Stats.CD] + a[BasicKey.CD] + trace[Stats.CD] + 0
+  a[BasicKey.EHR] = base[Stats.EHR] + lc[Stats.EHR] + a[BasicKey.EHR] + trace[Stats.EHR] + 0
+  a[BasicKey.RES] = base[Stats.RES] + lc[Stats.RES] + a[BasicKey.RES] + trace[Stats.RES] + 0
+  a[BasicKey.BE] = base[Stats.BE] + lc[Stats.BE] + a[BasicKey.BE] + trace[Stats.BE] + 0
+  a[BasicKey.ERR] = base[Stats.ERR] + lc[Stats.ERR] + a[BasicKey.ERR] + trace[Stats.ERR] + 0
+  a[BasicKey.OHB] = base[Stats.OHB] + lc[Stats.OHB] + a[BasicKey.OHB] + trace[Stats.OHB] + 0
 }
 
 export function calculateBasicEffects(x: ComputedStatsContainer, action: OptimizerAction, context: OptimizerContext) {
@@ -307,12 +305,12 @@ export function executeNonDynamicCombatSets(
 
 export function calculateRelicStats(
   c: BasicStatsArray,
-  head: SimulationRelic,
-  hands: SimulationRelic,
-  body: SimulationRelic,
-  feet: SimulationRelic,
-  planarSphere: SimulationRelic,
-  linkRope: SimulationRelic,
+  head: Pick<SimulationRelic, 'condensedStats'>,
+  hands: Pick<SimulationRelic, 'condensedStats'>,
+  body: Pick<SimulationRelic, 'condensedStats'>,
+  feet: Pick<SimulationRelic, 'condensedStats'>,
+  planarSphere: Pick<SimulationRelic, 'condensedStats'>,
+  linkRope: Pick<SimulationRelic, 'condensedStats'>,
 ) {
   const a = c.a
   for (const condensedStat of head.condensedStats ?? []) {
@@ -333,27 +331,4 @@ export function calculateRelicStats(
   for (const condensedStat of linkRope.condensedStats ?? []) {
     a[condensedStat[0]] += condensedStat[1]
   }
-}
-
-function sumPercentStat(
-  stat: StatsValues,
-  base: Record<string, number>,
-  lc: Record<string, number>,
-  trace: Record<string, number>,
-  relicSum: BasicStatsArray,
-  setEffects: number,
-): number {
-  return base[stat] + lc[stat] + relicSum.a[BasicStatToKey[stat]] + trace[stat] + setEffects
-}
-
-function sumFlatStat(
-  stat: StatsValues,
-  statP: StatsValues,
-  baseValue: number,
-  lc: Record<string, number>,
-  trace: Record<string, number>,
-  relicSum: BasicStatsArray,
-  setEffects: number,
-): number {
-  return baseValue * (1 + setEffects + relicSum.a[BasicStatToKey[statP]] + trace[statP] + lc[statP]) + relicSum.a[BasicStatToKey[stat]] + trace[stat]
 }

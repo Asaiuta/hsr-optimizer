@@ -5,6 +5,7 @@ import {
   type GeneratedSetMaskWgsl,
   generateSetMaskWgsl,
 } from 'lib/gpu/injection/generateSetMaskWgsl'
+import { getGpuActionCount } from 'lib/gpu/injection/gpuActionPlan'
 import { injectComputedStats } from 'lib/gpu/injection/injectComputedStats'
 import { generateDynamicConditionals } from 'lib/gpu/injection/injectConditionals'
 import { injectSettings } from 'lib/gpu/injection/injectSettings'
@@ -31,8 +32,7 @@ import type {
 } from 'types/optimizer'
 
 function generateShaderVariables(context: OptimizerContext, request: Form, gpuParams: GpuConstants) {
-  // All sort options need all actions generated for proper stat computation
-  const actionLength = context.defaultActions.length + context.rotationActions.length
+  const actionLength = getGpuActionCount(request, context, gpuParams.DEBUG)
 
   // EHP is needed for filtering, sorting, or debug mode
   const needsEhpFilter = request.minEhp > 0 || request.maxEhp < Constants.MAX_INT
@@ -62,6 +62,7 @@ export function generateWgsl(context: OptimizerContext, request: Form, relics: R
   wgsl = injectSetFilters(wgsl, request)
   wgsl = injectComputedStats(wgsl)
   wgsl = injectDispatchMode(wgsl, gpuParams, setMasks)
+  if (!gpuParams.DEBUG) wgsl = wgsl.replaceAll('relics[', 'rankedRelics.values[')
 
   return wgsl
 }
@@ -259,6 +260,35 @@ ${format(basicFilters)}
 
 function injectGpuParams(wgsl: string, request: Form, context: OptimizerContext, gpuParams: GpuConstants) {
   const cyclesPerInvocation = gpuParams.DEBUG ? 1 : gpuParams.CYCLES_PER_INVOCATION
+  if (!gpuParams.DEBUG) {
+    // Share the existing storage binding: tuple + both set filters already uses
+    // all eight storage slots on devices without uniform-buffer layout support.
+    wgsl = wgsl.replace(
+      '@group(1) @binding(0) var<storage> relics : array<Relic>;',
+      `struct RankedRelics {
+  values: array<Relic, hSize + gSize + bSize + fSize + pSize + lSize>,
+  ranks: array<u32>,
+}
+@group(1) @binding(0) var<storage, read> rankedRelics: RankedRelics;`,
+    )
+    wgsl += `
+fn keepResult(value: f32, h: i32, g: i32, b: i32, f: i32, p: i32, l: i32) -> bool {
+  if (value > params.threshold) { return true; }
+  if (value != params.threshold || params.tieEnabled == 0u) { return false; }
+  let rh = rankedRelics.ranks[u32(h)];
+  if (rh != params.tieH) { return rh < params.tieH; }
+  let rg = rankedRelics.ranks[u32(g + handsOffset)];
+  if (rg != params.tieG) { return rg < params.tieG; }
+  let rb = rankedRelics.ranks[u32(b + bodyOffset)];
+  if (rb != params.tieB) { return rb < params.tieB; }
+  let rf = rankedRelics.ranks[u32(f + feetOffset)];
+  if (rf != params.tieF) { return rf < params.tieF; }
+  let rp = rankedRelics.ranks[u32(p + planarOffset)];
+  if (rp != params.tieP) { return rp < params.tieP; }
+  return rankedRelics.ranks[u32(l + ropeOffset)] < params.tieL;
+}
+`
+  }
 
   wgsl = wgsl.replace(
     '/* INJECT GPU PARAMS */',
@@ -326,8 +356,14 @@ export function injectDispatchMode(
   let tXb = i32(a.xb);
   let tXg = i32(a.xg);
   let tXh = i32(a.xh);
+  let tXp = i32(a.xp);
+  let tXl = i32(a.xl);
 
-  let threadOffset = i32(a.startOffset) + i32(local_invocation_index) * CYCLES_PER_INVOCATION;
+  let localStart = i32(local_invocation_index) * CYCLES_PER_INVOCATION;
+  // Empty tail invocations must not decode or preload out-of-range relics.
+  if (localStart >= permLimit) { return; }
+  let invocationLimit = min(CYCLES_PER_INVOCATION, permLimit - localStart);
+  let threadOffset = i32(a.startOffset) + localStart;
 
   let l0 = threadOffset % tLSize;
   let c1 = threadOffset / tLSize;
@@ -340,8 +376,8 @@ export function injectDispatchMode(
   let g0 = c4 % tGSize;
   let h0 = c4 / tGSize;
 
-  var curL = l0;
-  var curP = p0;
+  var curL = tXl + l0;
+  var curP = tXp + p0;
   var curF = tXf + f0;
   var curB = tXb + b0;
   var curG = tXg + g0;
@@ -352,7 +388,7 @@ export function injectDispatchMode(
     wgsl = wgsl.replace(
       '/* INJECT PERM LIMIT CHECK */',
       `
-    let localIndex = i32(local_invocation_index) * CYCLES_PER_INVOCATION + i;
+    let localIndex = localStart + i;
     if (localIndex >= permLimit) {
       break;
     }
@@ -365,12 +401,14 @@ export function injectDispatchMode(
     continuing {
       i++;
 
+      // Preserve the final valid-count flush without preloading past the slice.
+      if (i < invocationLimit) {
       curL += 1;
-      if (curL >= tLSize) {
-        curL = 0;
+      if (curL >= tXl + tLSize) {
+        curL = tXl;
         curP += 1;
-        if (curP >= tPSize) {
-          curP = 0;
+        if (curP >= tXp + tPSize) {
+          curP = tXp;
           curF += 1;
           if (curF >= tXf + tFSize) {
             curF = tXf;
@@ -401,6 +439,7 @@ ${setMasks.outerMaskRefresh.feet}
         }
         planarSphere = relics[curP + planarOffset];
         setP = u32(planarSphere.v5.z);
+      }
       }
     }
 `,

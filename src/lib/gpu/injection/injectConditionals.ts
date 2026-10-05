@@ -28,7 +28,7 @@ function generateDependencyEvaluator(
   let conditionalDefinitionsWgsl = ''
   let conditionalStateDefinition = ''
 
-  for (const action of context.allActions) {
+  for (const action of context.allActions.slice(0, context.shaderVariables.actionLength)) {
     conditionalDefinitionsWgsl += registeredConditionals[stat]
       .map((conditional) => {
         if (conditional.teammateIndex == null) {

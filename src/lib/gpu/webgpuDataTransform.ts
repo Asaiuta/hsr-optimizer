@@ -25,10 +25,19 @@ export function getGpuResultThreshold(gpuContext: GpuExecutionContext): number {
     : EMPTY_QUEUE_RESULT_THRESHOLD
 }
 
+/** Append six exact u32 rank keys and a full-queue flag; never encode large IDs as f32. */
+export function writeGpuTieThreshold(buffer: ArrayBuffer, byteOffset: number, gpuContext: GpuExecutionContext): void {
+  const u32 = new Uint32Array(buffer, byteOffset, 8)
+  if (gpuContext.resultsQueue.size() < gpuContext.RESULTS_LIMIT) return
+  u32.set(gpuContext.tieOrder.rankTuple(gpuContext.resultsQueue.topKey()))
+  u32[6] = 1
+}
+
 export function generateParamsMatrix(
   offset: number,
   relics: RelicsByPart,
   gpuContext: GpuExecutionContext,
+  rangeSize = gpuContext.BLOCK_SIZE * gpuContext.CYCLES_PER_INVOCATION,
 ) {
   const lSize = relics.LinkRope.length
   const pSize = relics.PlanarSphere.length
@@ -48,11 +57,10 @@ export function generateParamsMatrix(
   const g = c4 % gSize
   const h = (c4 - g) / gSize
 
-  const permStride = gpuContext.BLOCK_SIZE * gpuContext.CYCLES_PER_INVOCATION
-  const permLimit = Math.min(permStride, gpuContext.permutations - offset)
+  const permLimit = Math.min(rangeSize, gpuContext.permutations - offset)
   const threshold = getGpuResultThreshold(gpuContext)
 
-  const buf = new ArrayBuffer(32)
+  const buf = new ArrayBuffer(64)
   const f32 = new Float32Array(buf)
   const u32 = new Uint32Array(buf)
   f32[0] = l
@@ -63,6 +71,7 @@ export function generateParamsMatrix(
   f32[5] = h
   f32[6] = threshold
   u32[7] = permLimit
+  writeGpuTieThreshold(buf, 32, gpuContext)
   return buf
 }
 
@@ -75,6 +84,15 @@ export function mergeRelicsIntoArray(relics: RelicsByPart) {
     ...relics.PlanarSphere,
     ...relics.LinkRope,
   ])
+}
+
+/** Preserve the float matrix bytes and append exact u32 ranks in the same storage binding. */
+export function packRankedRelics(matrix: Float32Array, ranks: Uint32Array): Uint32Array {
+  // RankedRelics has 16-byte alignment, including its runtime-array tail.
+  const packed = new Uint32Array(Math.ceil((matrix.length + ranks.length) / 4) * 4)
+  packed.set(new Uint32Array(matrix.buffer, matrix.byteOffset, matrix.length))
+  packed.set(ranks, matrix.length)
+  return packed
 }
 
 const RELIC_ARG_SIZE = 24
@@ -149,6 +167,8 @@ export type WorkgroupEntry = {
   bSize: number,
   xf: number,
   fSize: number,
+  xp: number,
+  xl: number,
   pSize: number,
   lSize: number,
   permLimit: number,
@@ -175,10 +195,25 @@ export function buildWorkgroupAssignments(
   fullSizes: FullSizes,
   wgCapacity: number,
 ): WorkgroupEntry[] {
+  if (tuples.length === 0) return []
+  const validSize = (n: number) => Number.isInteger(n) && n > 0 && n <= MAX_TUPLE_WEIGHT
+  if (!validSize(wgCapacity) || !validSize(fullSizes.pSize) || !validSize(fullSizes.lSize)) {
+    throw new Error('Tuple dimensions and workgroup capacity must fit positive i32 values')
+  }
+  for (const t of tuples) {
+    for (const [start, size] of [[t.xh, t.hSize], [t.xg, t.gSize], [t.xb, t.bSize], [t.xf, t.fSize]]) {
+      if (!Number.isInteger(start) || start < 0 || !validSize(size) || start + size > MAX_TUPLE_WEIGHT) {
+        throw new Error('Tuple ranges must fit nonnegative i32 coordinates')
+      }
+    }
+    if (!Number.isSafeInteger(t.hSize * t.gSize * t.bSize * t.fSize * fullSizes.pSize * fullSizes.lSize)) {
+      throw new Error('Tuple permutation count exceeds the exact integer range')
+    }
+  }
   const safeTuples = splitOversizedTuples(tuples, fullSizes)
   const assignments: WorkgroupEntry[] = []
   for (const t of safeTuples) {
-    const weight = t.hSize * t.gSize * t.bSize * t.fSize * fullSizes.pSize * fullSizes.lSize
+    const weight = t.hSize * t.gSize * t.bSize * t.fSize * t.pSize * t.lSize
     const numWGs = Math.ceil(weight / wgCapacity)
     for (let wg = 0; wg < numWGs; wg++) {
       const start = wg * wgCapacity
@@ -192,8 +227,10 @@ export function buildWorkgroupAssignments(
         bSize: t.bSize,
         xf: t.xf,
         fSize: t.fSize,
-        pSize: fullSizes.pSize,
-        lSize: fullSizes.lSize,
+        xp: t.xp,
+        xl: t.xl,
+        pSize: t.pSize,
+        lSize: t.lSize,
         permLimit: limit,
         startOffset: start,
       })
@@ -202,12 +239,14 @@ export function buildWorkgroupAssignments(
   return assignments
 }
 
-function splitOversizedTuples(tuples: TupleParams[], fullSizes: FullSizes): TupleParams[] {
-  const result: TupleParams[] = []
-  const queue = [...tuples]
+type TupleSlice = TupleParams & FullSizes & { xp: number, xl: number }
+
+function splitOversizedTuples(tuples: TupleParams[], fullSizes: FullSizes): TupleSlice[] {
+  const result: TupleSlice[] = []
+  const queue = tuples.map((t) => ({ ...t, ...fullSizes, xp: 0, xl: 0 }))
   while (queue.length > 0) {
     const t = queue.pop()!
-    const weight = t.hSize * t.gSize * t.bSize * t.fSize * fullSizes.pSize * fullSizes.lSize
+    const weight = t.hSize * t.gSize * t.bSize * t.fSize * t.pSize * t.lSize
     if (weight <= MAX_TUPLE_WEIGHT) {
       result.push(t)
       continue
@@ -218,12 +257,13 @@ function splitOversizedTuples(tuples: TupleParams[], fullSizes: FullSizes): Tupl
       { key: 'bSize', xKey: 'xb' },
       { key: 'fSize', xKey: 'xf' },
     ]
-    const largest = dims.reduce((a, b) => t[a.key] >= t[b.key] ? a : b)
+    // Keep the original outer-slot split order for ordinary inventories. Only
+    // split ornaments once all four outer slots have become singletons.
+    const outer = dims.reduce((a, b) => t[a.key] >= t[b.key] ? a : b)
+    const largest = t[outer.key] > 1 ? outer : t.pSize >= t.lSize
+      ? { key: 'pSize', xKey: 'xp' } as const
+      : { key: 'lSize', xKey: 'xl' } as const
     const size = t[largest.key]
-    if (size <= 1) {
-      result.push(t)
-      continue
-    }
     const half = Math.floor(size / 2)
     queue.push({ ...t, [largest.key]: half })
     queue.push({ ...t, [largest.xKey]: t[largest.xKey] + half, [largest.key]: size - half })
@@ -251,7 +291,9 @@ export function serializeAssignments(assignments: WorkgroupEntry[]): ArrayBuffer
     u[off + 9] = a.lSize
     u[off + 10] = a.permLimit
     u[off + 11] = a.startOffset
-    // 12-15: padding (zero)
+    u[off + 12] = a.xp
+    u[off + 13] = a.xl
+    // 14-15: padding (zero); assignment stride remains 64 bytes.
   }
   return buf
 }

@@ -46,6 +46,7 @@ export type OptimizerDisplayState = {
   permutationDetails: PermutationDetails,
   optimizationInProgress: boolean,
   optimizationId: string | null,
+  optimizationOutcome: OptimizationOutcome | null,
   optimizerRunningEngine: ComputeEngine,
   optimizerStartTime: number | null,
   optimizerEndTime: number | null,
@@ -61,3 +62,8 @@ export type OptimizerDisplayState = {
   lightConeSelectModalOpen: boolean,
   menuState: Record<string, boolean>,
 }
+
+export type OptimizationOutcome =
+  | { status: 'completed' }
+  | { status: 'cancelled' }
+  | { status: 'failed', error: string }

@@ -2,36 +2,29 @@ import i18next from 'i18next'
 import {
   COMPUTE_ENGINE_CPU,
   Constants,
-  type ElementName,
-  ElementToStatKeyDmgBoost,
   type Parts,
-  Stats,
 } from 'lib/constants/constants'
 import { SavedSessionKeys } from 'lib/constants/constantsSession'
-import { FixedSizeMinQueue } from 'lib/dataStructures/fixedSizeMinQueue'
 import { getWebgpuDevice } from 'lib/gpu/webgpuDevice'
 import { gpuOptimize } from 'lib/gpu/webgpuOptimizer'
 import { type RelicsByPart } from 'lib/gpu/webgpuTypes'
 import { Message } from 'lib/interactions/message'
 import { webgpuCrashNotification } from 'lib/interactions/notifications'
-import { BasicKey } from 'lib/optimization/basicStatsArray'
-import {
-  BufferPacker,
-  ElementToBasicKeyDmgBoost,
-  type OptimizerDisplayData,
-} from 'lib/optimization/bufferPacker'
+import { createBatchCursor } from 'lib/optimization/batchCursor'
+import { type OptimizerDisplayData } from 'lib/optimization/bufferPacker'
 import { generateContext } from 'lib/optimization/context/calculateContext'
-import {
-  GlobalRegister,
-  StatKey,
-} from 'lib/optimization/engine/config/keys'
-import { type ComputedStatsContainer } from 'lib/optimization/engine/container/computedStatsContainer'
+import { createCpuResultRows } from 'lib/optimization/cpuResultRows'
+import { formatOptimizerDisplayData } from 'lib/optimization/optimizerDisplayData'
 import {
   applySemiJoinReduction,
   computeValidPermutationCount,
   generateOrnamentSetSolutions,
   generateRelicSetSolutions,
 } from 'lib/optimization/relicSetSolver'
+import {
+  createResultTieOrder,
+  OptimizerResultQueue,
+} from 'lib/optimization/resultTieOrder'
 import { bitpackBooleanArray } from 'lib/optimization/setSolutionBitset'
 import { SortOption } from 'lib/optimization/sortOptions'
 import {
@@ -49,6 +42,7 @@ import { logRegisters } from 'lib/simulations/registerLogger'
 import { simulateBuild } from 'lib/simulations/simulateBuild'
 import {
   type SimulationRelic,
+  type SimulationRelicArrayByPart,
   type SimulationRelicByPart,
 } from 'lib/simulations/statSimulationTypes'
 import { useGlobalStore } from 'lib/stores/app/appStore'
@@ -56,6 +50,7 @@ import { getCharacterById } from 'lib/stores/character/characterStore'
 import { setSortColumn } from 'lib/stores/gridStore'
 import { gridStore } from 'lib/stores/gridStore'
 import {
+  finishOptimizationRun,
   isOptimizationRunActive,
   ownsOptimizationRun,
   useOptimizerDisplayStore,
@@ -68,6 +63,11 @@ import {
 import { OptimizerTabController } from 'lib/tabs/tabOptimizer/optimizerTabController'
 import { sleep } from 'lib/utils/frontendUtils'
 import { clone } from 'lib/utils/objectUtils'
+import type {
+  OptimizerWorkerInput,
+  OptimizerWorkerResult,
+} from 'lib/worker/optimizerWorker'
+import { prepareOptimizerWorkerRelics } from 'lib/worker/optimizerWorkerRelics'
 import {
   WorkerCancelledError,
   workerPool,
@@ -77,16 +77,7 @@ import {
   type Form,
   type OptimizerForm,
 } from 'types/form'
-
-// Cancellation stops the current run; ownership checks reject stale callbacks.
-let CANCEL = false
-
-type OptimizerWorkerResult = {
-  buffer: ArrayBuffer,
-}
-
-// Buffer pool managed by the optimizer
-const optimizerBuffers: ArrayBuffer[] = []
+import type { OptimizerContext } from 'types/optimizer'
 
 function countRelicsBySet(relicsByPart: RelicsByPart): PartCountsBySet {
   const out = zeroCountsBySet()
@@ -97,26 +88,6 @@ function countRelicsBySet(relicsByPart: RelicsByPart): PartCountsBySet {
   for (const r of relicsByPart.PlanarSphere) out.PlanarSphere[OrnamentSetToIndex[r.set as SetsOrnaments]]++
   for (const r of relicsByPart.LinkRope) out.LinkRope[OrnamentSetToIndex[r.set as SetsOrnaments]]++
   return out
-}
-
-function acquireBuffer(): ArrayBuffer {
-  if (optimizerBuffers.length > 0) {
-    const buffer = optimizerBuffers.pop()!
-    BufferPacker.cleanFloatBuffer(buffer)
-    return buffer
-  }
-  return BufferPacker.createFloatBuffer(Constants.THREAD_BUFFER_LENGTH)
-}
-
-function releaseBuffer(buffer: ArrayBuffer): void {
-  optimizerBuffers.push(buffer)
-}
-
-/** Release buffer allocated by prepareInput on retry (prevents leak when buffer was cloned, not transferred) */
-function releaseRetryBuffer(taskInput: { buffer: ArrayBuffer }, resultBuffer: ArrayBuffer): void {
-  if (taskInput.buffer.byteLength > 0 && taskInput.buffer !== resultBuffer) {
-    releaseBuffer(taskInput.buffer)
-  }
 }
 
 export function calculateCurrentlyEquippedRow(request: OptimizerForm) {
@@ -138,7 +109,7 @@ export function calculateCurrentlyEquippedRow(request: OptimizerForm) {
     logRegisters(x, context, 'Simulate Build')
   }
 
-  const optimizerDisplayData = formatOptimizerDisplayData(x)
+  const optimizerDisplayData = formatOptimizerDisplayData(x, useOptimizerDisplayStore.getState().context)
   OptimizerTabController.setTopRow(optimizerDisplayData, true)
   useOptimizerDisplayStore.getState().setOptimizerSelectedRowData(optimizerDisplayData)
 
@@ -150,8 +121,10 @@ export function calculateCurrentlyEquippedRow(request: OptimizerForm) {
 
 export const Optimizer = {
   cancel: () => {
-    CANCEL = true
-    workerPool.cancelQueue()
+    const { optimizationId, optimizationInProgress } = useOptimizerDisplayStore.getState()
+    if (!optimizationInProgress || !optimizationId) return
+    finishOptimizationRun(optimizationId, { status: 'cancelled' })
+    workerPool.cancelQueue(WorkerType.OPTIMIZER)
   },
 
   getFilteredRelicCounts: (request: Form) => RelicFilters.getFilteredRelicCounts(request),
@@ -191,13 +164,12 @@ export const Optimizer = {
     const ownsRun = () => ownsOptimizationRun(runId)
 
     // A newer run may take ownership before this deferred call starts.
-    if (!ownsRun()) return
+    if (!isOptimizationRunActive(runId)) return
 
     // Cancel any in-progress optimization before starting a new one
     if (useOptimizerDisplayStore.getState().optimizationInProgress) {
-      workerPool.cancelQueue()
+      workerPool.cancelQueue(WorkerType.OPTIMIZER)
     }
-    CANCEL = false
 
     let [relics] = this.getFilteredRelics(request)
     RelicFilters.condenseRelicSubstatsForOptimizer(relics)
@@ -233,15 +205,10 @@ export const Optimizer = {
 
     console.log(`Optimization permutations: ${permutations} (valid: ${validPermutations}), blocksize: ${Constants.THREAD_BUFFER_LENGTH}`)
     if (permutations == 0 || validPermutations == 0) {
-      useOptimizerDisplayStore.getState().setOptimizationInProgress(false)
       activateZeroPermutationsSuggestionsModal(request)
       OptimizerTabController.setRows([])
       OptimizerTabController.resetDataSource()
-      return
-    }
-
-    if (CANCEL) {
-      useOptimizerDisplayStore.getState().setOptimizationInProgress(false)
+      finishOptimizationRun(runId, { status: 'completed' })
       return
     }
 
@@ -252,14 +219,7 @@ export const Optimizer = {
 
     useOptimizerDisplayStore.getState().setContext(context)
 
-    // Create a special optimization request for the top row, ignoring filters and with a custom callback
-    setTimeout(() => {
-      if (!ownsRun()) return
-      void calculateCurrentlyEquippedRow(request)
-    }, 200)
-
     let searched = 0
-    let resultsShown = false
     let results = []
 
     const sortOption = SortOption[request.resultSort!]
@@ -269,124 +229,113 @@ export const Optimizer = {
       ? (showMemo ? sortOption.memoCombatGridColumn : sortOption.combatGridColumn)
       : (showMemo ? sortOption.memoBasicGridColumn : sortOption.basicGridColumn)) as keyof OptimizerDisplayData
     const resultsLimit = request.resultsLimit ?? 1024
-    const queueResults = new FixedSizeMinQueue<OptimizerDisplayData>(resultsLimit)
+    const tieOrder = createResultTieOrder(relics)
+    const queueResults = new OptimizerResultQueue(resultsLimit, tieOrder)
 
     // Incrementally increase the optimization run sizes instead of having a fixed size, so it doesn't lag for 2 seconds on Start
-    const increment = 20000
-    let runSize = 0
-    const maxSize = Constants.THREAD_BUFFER_LENGTH
-
-    const clonedContext = clone(context) // Cloning this so the webgpu code doesnt insert conditionalRegistry with functions
-
     const computeEngine = useGlobalStore.getState().savedSession[SavedSessionKeys.computeEngine]
 
     if (computeEngine != COMPUTE_ENGINE_CPU) {
-      void getWebgpuDevice(true).then((device) => {
-        if (!ownsRun()) return
+      try {
+        // Yield the loading state without a fixed startup delay. Prepare the equipped row
+        // before dispatch so a fast search cannot be followed by a late selection update.
+        await sleep(0)
+        if (!isOptimizationRunActive(runId)) return
+        calculateCurrentlyEquippedRow(request)
+
+        const device = await getWebgpuDevice(true)
+        if (!isOptimizationRunActive(runId)) return
         if (device == null) {
           Message.error(t('Error.GPUNotAvailable'), 15)
           // GPU path won't run and CPU path already skipped — stop optimization
-          useOptimizerDisplayStore.getState().setOptimizationInProgress(false)
+          finishOptimizationRun(runId, { status: 'failed', error: 'GPU acceleration is unavailable' })
         } else {
-          return sleep(200).then(() => {
-            if (!ownsRun()) return
-            return gpuOptimize({
-              device,
-              context: context,
-              request: request,
-              relics: relics,
-              permutations: permutations,
-              validPermutations: validPermutations,
-              computeEngine: computeEngine,
-              relicSetSolutions: relicSetSolutions,
-              ornamentSetSolutions: ornamentSetSolutions,
-            })
+          await gpuOptimize({
+            device,
+            context: context,
+            request: request,
+            relics: relics,
+            permutations: permutations,
+            validPermutations: validPermutations,
+            computeEngine: computeEngine,
+            relicSetSolutions: relicSetSolutions,
+            ornamentSetSolutions: ornamentSetSolutions,
           })
         }
-      }).catch((error) => {
+      } catch (error) {
         console.error('WebGPU optimization failed:', error)
         if (!isOptimizationRunActive(runId)) return
-        useOptimizerDisplayStore.getState().setOptimizationInProgress(false)
+        finishOptimizationRun(runId, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
         webgpuCrashNotification()
-      })
+      }
     }
 
     if (computeEngine == COMPUTE_ENGINE_CPU) {
-      // Generate runs
-      const runs: { skip: number, runSize: number }[] = []
-      for (let currentSkip = 0; currentSkip < permutations; currentSkip += runSize) {
-        runSize = Math.min(maxSize, runSize + increment)
-        runs.push({
-          skip: currentSkip,
-          runSize: runSize,
-        })
-      }
+      setTimeout(() => {
+        if (!ownsRun()) return
+        calculateCurrentlyEquippedRow(request)
+      }, 200)
 
+      const batches = createBatchCursor(permutations, Constants.THREAD_BUFFER_LENGTH)
+      const clonedContext = clone(context)
+      const workerRelics = prepareOptimizerWorkerRelics(relics)
+      const packedRelicSets = Uint32Array.from(bitpackBooleanArray(relicSetSolutions))
+      const packedOrnamentSets = Uint32Array.from(bitpackBooleanArray(ornamentSetSolutions))
       let inProgress = 0
-      let nextRunIndex = 0
 
       useOptimizerDisplayStore.getState().setOptimizerStartTime(Date.now())
       useOptimizerDisplayStore.getState().setOptimizerRunningEngine(COMPUTE_ENGINE_CPU)
 
       function finalize() {
-        useOptimizerDisplayStore.getState().setOptimizationInProgress(false)
-        results = queueResults.toArray()
-        results.sort((a, b) => (b[gridSortColumn] as number) - (a[gridSortColumn] as number))
+        if (!isOptimizationRunActive(runId)) return
+        results = createCpuResultRows(queueResults.toResults().map((r) => r.index), relics as SimulationRelicArrayByPart, context)
+        results.sort((a, b) => (b[gridSortColumn] as number) - (a[gridSortColumn] as number) || tieOrder.compareIndices(a.id, b.id))
         OptimizerTabController.setRows(results)
         setSortColumn(gridSortColumn)
         gridStore.optimizerGridApi()?.updateGridOptions({
           datasource: OptimizerTabController.getDataSource({ colId: gridSortColumn, sort: 'desc' }),
         })
-        resultsShown = true
+        finishOptimizationRun(runId, { status: 'completed' })
       }
 
       function dispatchNextRun() {
-        if (CANCEL || !ownsRun() || nextRunIndex >= runs.length) return
-        const run = runs[nextRunIndex++]
+        if (!isOptimizationRunActive(runId)) return
+        const run = batches.next()
+        if (!run) return
         inProgress++
 
-        const buffer = acquireBuffer()
         const taskInput = {
           context: clonedContext,
           request: request,
-          relics: relics,
+          relics: workerRelics,
           WIDTH: run.runSize,
           skip: run.skip,
           permutations: permutations,
-          relicSetSolutions: bitpackBooleanArray(relicSetSolutions),
-          ornamentSetSolutions: bitpackBooleanArray(ornamentSetSolutions),
+          relicSetSolutions: packedRelicSets,
+          ornamentSetSolutions: packedOrnamentSets,
           workerType: WorkerType.OPTIMIZER,
-          buffer,
-        }
+        } satisfies OptimizerWorkerInput
 
         workerPool.runTask<typeof taskInput, OptimizerWorkerResult>(taskInput, {
-          transferables: [buffer],
           maxRetries: 10,
           prepareInput: (input) => {
-            // Re-acquire buffer if the previous one was lost in a worker crash
-            // (transferred buffers become detached/zero-length when the worker dies)
-            if (input.buffer.byteLength === 0) {
-              input.buffer = acquireBuffer()
-            }
             // Rising min-filter floor: computed at dispatch time, not creation time.
             // As results accumulate from completed workers, later-dispatched tasks
             // get tighter thresholds and skip more permutations.
-            input.request.resultMinFilter = queueResults.size() && queueResults.size() >= request.resultsLimit!
+            input.request.resultMinFilter = queueResults.size() >= resultsLimit
               ? queueResults.topPriority()
-              : 0
+              : Number.NEGATIVE_INFINITY
           },
         }).then((result) => {
           searched += run.runSize
           inProgress--
 
-          if (!ownsRun() || (CANCEL && resultsShown)) {
-            releaseBuffer(result.buffer)
-            releaseRetryBuffer(taskInput, result.buffer)
-            return
-          }
+          if (!isOptimizationRunActive(runId)) return
 
-          const resultArr = new Float32Array(result.buffer)
-          BufferPacker.extractArrayToResults(resultArr, run.runSize, queueResults, taskInput.skip, gridSortColumn)
+          const candidates = result.candidates
+          for (let i = 0; i < candidates.length; i += 2) {
+            queueResults.fixedSizePush(candidates[i], candidates[i + 1])
+          }
 
           // Rescale searched count into valid-permutation space for progress display
           useOptimizerDisplayStore.setState({
@@ -396,11 +345,7 @@ export const Optimizer = {
             optimizerEndTime: Date.now(),
           })
 
-          // Release buffers after extraction is complete
-          releaseBuffer(result.buffer)
-          releaseRetryBuffer(taskInput, result.buffer)
-
-          if ((inProgress === 0 && nextRunIndex >= runs.length) || CANCEL) {
+          if (inProgress === 0 && !batches.hasNext()) {
             finalize()
             console.log('Done', results.length)
             if (!results.length && !inProgress) activateZeroResultSuggestionsModal(request)
@@ -411,162 +356,24 @@ export const Optimizer = {
         }).catch((error) => {
           // Guard against cancellation — cancelQueue() and terminate() reject with
           // WorkerCancelledError. Don't decrement inProgress or create buffers for these.
-          if (error instanceof WorkerCancelledError || CANCEL || !ownsRun()) return
-          console.warn('Optimizer worker error:', error)
-          inProgress--
-          // Buffer is lost when worker dies — create replacement for the pool
-          releaseBuffer(BufferPacker.createFloatBuffer(Constants.THREAD_BUFFER_LENGTH))
-
-          if (inProgress === 0 && nextRunIndex >= runs.length) {
-            finalize()
-            if (!results.length) activateZeroResultSuggestionsModal(request)
+          if (!isOptimizationRunActive(runId)) return
+          if (error instanceof WorkerCancelledError) {
+            finishOptimizationRun(runId, { status: 'cancelled' })
             return
           }
-
-          dispatchNextRun()
+          console.warn('Optimizer worker error:', error)
+          inProgress--
+          // An exhausted worker retry means an incomplete search, never a successful optimum.
+          finishOptimizationRun(runId, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+          workerPool.cancelQueue(WorkerType.OPTIMIZER)
         })
       }
 
       // Seed pool with initial tasks — one per available worker
-      const initialBatch = Math.min(runs.length, workerPool.getPoolSize())
+      const initialBatch = workerPool.getPoolSize()
       for (let i = 0; i < initialBatch; i++) {
         dispatchNextRun()
       }
     }
   },
-}
-
-// TODO: This is a temporary tool to rename computed stats variables to fit the optimizer grid
-export function formatOptimizerDisplayData(x: ComputedStatsContainer) {
-  const context = useOptimizerDisplayStore.getState().context
-  const c = x.c
-  const d: Partial<OptimizerDisplayData> = {
-    relicSetIndex: c.relicSetIndex,
-    ornamentSetIndex: c.ornamentSetIndex,
-    id: c.id,
-    WEIGHT: c.weight,
-    xa: new Float64Array(x.a),
-    ca: new Float32Array(c.a),
-    tracedX: x,
-  }
-  const a = x.a
-
-  // Use direct array access for robustness (c may be deserialized plain object)
-  d.HP = c.a[BasicKey.HP]
-  d.ATK = c.a[BasicKey.ATK]
-  d.DEF = c.a[BasicKey.DEF]
-  d.SPD = c.a[BasicKey.SPD]
-  d.CR = c.a[BasicKey.CR]
-  d.CD = c.a[BasicKey.CD]
-  d.EHR = c.a[BasicKey.EHR]
-  d.RES = c.a[BasicKey.RES]
-  d.BE = c.a[BasicKey.BE]
-  d.ERR = c.a[BasicKey.ERR]
-  d.OHB = c.a[BasicKey.OHB]
-
-  // TODO
-  // d.BASIC = a[StatKey.BASIC_DMG]
-  // d.SKILL = a[StatKey.SKILL_DMG]
-  // d.ULT = a[StatKey.ULT_DMG]
-  // d.FUA = a[StatKey.FUA_DMG]
-  // d.MEMO_SKILL = a[StatKey.MEMO_SKILL_DMG]
-  // d.MEMO_TALENT = a[StatKey.MEMO_TALENT_DMG]
-  // d.DOT = a[StatKey.DOT_DMG]
-  // d.BREAK = a[StatKey.BREAK_DMG]
-  d.COMBO = x.getGlobalRegisterValue(GlobalRegister.COMBO_DMG)
-  d.EHP = a[StatKey.EHP]
-
-  d.xHP = a[StatKey.HP]
-  d.xATK = a[StatKey.ATK]
-  d.xDEF = a[StatKey.DEF]
-  d.xSPD = a[StatKey.SPD]
-  d.xCR = a[StatKey.CR] + a[StatKey.CR_BOOST]
-  d.xCD = a[StatKey.CD] + a[StatKey.CD_BOOST]
-  d.xEHR = a[StatKey.EHR]
-  d.xRES = a[StatKey.RES]
-  d.xBE = a[StatKey.BE]
-  d.xERR = a[StatKey.ERR]
-  d.xOHB = a[StatKey.OHB]
-  d.xELEMENTAL_DMG = a[StatKey.BOOST]
-
-  if (context) {
-    const basicElementalBoostKey = ElementToBasicKeyDmgBoost[context.element]
-    d.ELEMENTAL_DMG = c.a[basicElementalBoostKey]
-    d.mELEMENTAL_DMG = c.a[basicElementalBoostKey]
-
-    switch (context.elementalDamageType) {
-      case Stats.Physical_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.PHYSICAL_DMG_BOOST]
-        break
-      case Stats.Fire_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.FIRE_DMG_BOOST]
-        break
-      case Stats.Ice_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.ICE_DMG_BOOST]
-        break
-      case Stats.Lightning_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.LIGHTNING_DMG_BOOST]
-        break
-      case Stats.Wind_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.WIND_DMG_BOOST]
-        break
-      case Stats.Quantum_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.QUANTUM_DMG_BOOST]
-        break
-      case Stats.Imaginary_DMG:
-        d.xELEMENTAL_DMG += a[StatKey.IMAGINARY_DMG_BOOST]
-        break
-    }
-
-    for (const action of context.defaultActions) {
-      // @ts-expect-error - action.actionName is a dynamic key that matches OptimizerDisplayData fields (BASIC, SKILL, ULT, etc.)
-      d[action.actionName] = x.getActionRegisterValue(action.registerIndex)
-    }
-  }
-
-  // Memosprite stats
-  let memoEntityIndex = -1
-  for (let i = 1; i < x.config.entitiesLength; i++) {
-    if (x.config.entitiesArray[i].memosprite) {
-      memoEntityIndex = i
-      break
-    }
-  }
-
-  if (memoEntityIndex >= 0 && context) {
-    const memoEntityConfig = x.config.entitiesArray[memoEntityIndex]
-    const memoEntity = memoEntityConfig.name
-    const ca = c.a
-
-    // Memosprite basic stats (scaled from summoner's basic stats)
-    d.mHP = (memoEntityConfig.memoBaseHpScaling ?? 0) * ca[BasicKey.HP] + (memoEntityConfig.memoBaseHpFlat ?? 0)
-    d.mATK = (memoEntityConfig.memoBaseAtkScaling ?? 0) * ca[BasicKey.ATK] + (memoEntityConfig.memoBaseAtkFlat ?? 0)
-    d.mDEF = (memoEntityConfig.memoBaseDefScaling ?? 0) * ca[BasicKey.DEF] + (memoEntityConfig.memoBaseDefFlat ?? 0)
-    d.mSPD = (memoEntityConfig.memoBaseSpdScaling ?? 0) * ca[BasicKey.SPD] + (memoEntityConfig.memoBaseSpdFlat ?? 0)
-    d.mCR = ca[BasicKey.CR]
-    d.mCD = ca[BasicKey.CD]
-    d.mEHR = ca[BasicKey.EHR]
-    d.mRES = ca[BasicKey.RES]
-    d.mBE = ca[BasicKey.BE]
-    d.mERR = ca[BasicKey.ERR]
-    d.mOHB = ca[BasicKey.OHB]
-
-    // Memosprite combat stats
-    d.mxHP = x.getActionValue(StatKey.HP, memoEntity)
-    d.mxATK = x.getActionValue(StatKey.ATK, memoEntity)
-    d.mxDEF = x.getActionValue(StatKey.DEF, memoEntity)
-    d.mxSPD = x.getActionValue(StatKey.SPD, memoEntity)
-    d.mxCR = x.getActionValue(StatKey.CR, memoEntity) + x.getActionValue(StatKey.CR_BOOST, memoEntity)
-    d.mxCD = x.getActionValue(StatKey.CD, memoEntity) + x.getActionValue(StatKey.CD_BOOST, memoEntity)
-    d.mxEHR = x.getActionValue(StatKey.EHR, memoEntity)
-    d.mxRES = x.getActionValue(StatKey.RES, memoEntity)
-    d.mxBE = x.getActionValue(StatKey.BE, memoEntity)
-    d.mxERR = x.getActionValue(StatKey.ERR, memoEntity)
-    d.mxOHB = x.getActionValue(StatKey.OHB, memoEntity)
-    d.mxELEMENTAL_DMG = x.getActionValue(StatKey.BOOST, memoEntity)
-      + x.getActionValue(ElementToStatKeyDmgBoost[context.element as ElementName], memoEntity)
-    d.mxEHP = x.getActionValue(StatKey.EHP, memoEntity)
-  }
-
-  return d as OptimizerDisplayData
 }

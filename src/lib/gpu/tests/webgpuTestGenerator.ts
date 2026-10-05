@@ -157,7 +157,7 @@ const baseCharacterLightConeMappings: Array<{ characterId: CharacterId, lightCon
 ]
 
 export async function generateAllTests() {
-  const device = await getWebgpuDevice()
+  const device = await getWebgpuDevice(undefined, { reuse: false })
   if (!device) return []
 
   cache.metadata = getGameMetadata()

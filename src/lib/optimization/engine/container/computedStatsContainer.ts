@@ -97,36 +97,6 @@ function entityMatchesTargetTag(
   return (targetTags & entity.targetMask) !== 0
 }
 
-// Precompute all actionBuff/actionSet indices
-function buildActionBuffIndexCache(
-  entities: OptimizerEntity[],
-  actionStatsLength: number,
-  hitStatsLength: number,
-  hitsLength: number,
-): Record<number, number[]> {
-  const cache: Record<number, number[]> = {}
-  const entityStride = actionStatsLength + (hitsLength * hitStatsLength)
-
-  const allTargetTags = Object.values(TargetTag).filter((v): v is number => typeof v === 'number')
-
-  for (const targetTags of allTargetTags) {
-    for (let statKey = 0; statKey < actionStatsLength; statKey++) {
-      const indices: number[] = []
-
-      for (let entityIndex = 0; entityIndex < entities.length; entityIndex++) {
-        if (entityMatchesTargetTag(entities[entityIndex], targetTags, entities)) {
-          indices.push(entityIndex * entityStride + statKey)
-        }
-      }
-
-      const cacheKey = (targetTags << 8) | statKey
-      cache[cacheKey] = indices
-    }
-  }
-
-  return cache
-}
-
 // Precompute per-TargetTag entity indices and base offsets
 function buildEntityTargetCaches(
   entities: OptimizerEntity[],
@@ -174,7 +144,6 @@ export class ComputedStatsContainerConfig {
   public hitRegistersLength: number // Number of hit registers
   public totalRegistersLength: number // action + hit + global registers
 
-  public actionBuffIndices: Record<number, number[]> // Cached indices for actionBuff/actionSet
   public entityBaseOffsets: Record<number, number[]> // Per-TargetTag entity base offsets for loop-flipped stat writes
   public targetEntityIndices: Record<number, number[]> // Per-TargetTag entity indices for internalBuff
   public deprioritizeBuffs: boolean
@@ -220,14 +189,6 @@ export class ComputedStatsContainerConfig {
 
     // Total array length includes stats + registers
     this.arrayLength = statsArrayLength + this.totalRegistersLength
-
-    // Precompute actionBuff indices for performance
-    this.actionBuffIndices = buildActionBuffIndexCache(
-      this.entitiesArray,
-      this.actionStatsLength,
-      this.hitStatsLength,
-      this.hitsLength,
-    )
 
     // Precompute per-TargetTag entity indices and base offsets
     const entityCaches = buildEntityTargetCaches(
@@ -458,11 +419,11 @@ export class ComputedStatsContainer {
       this.a[key as number] += value
       return
     }
-    const cacheKey = (targetTags << 8) | (key as number)
-    const indices = this.config.actionBuffIndices[cacheKey]
+    // Share per-target offsets instead of allocating a duplicate array for every stat.
+    const offsets = this.config.entityBaseOffsets[targetTags]
 
-    for (let i = 0; i < indices.length; i++) {
-      this.a[indices[i]] += value
+    for (let i = 0; i < offsets.length; i++) {
+      this.a[offsets[i] + key] += value
     }
   }
 
@@ -471,11 +432,10 @@ export class ComputedStatsContainer {
       this.a[key as number] = value
       return
     }
-    const cacheKey = (targetTags << 8) | (key as number)
-    const indices = this.config.actionBuffIndices[cacheKey]
+    const offsets = this.config.entityBaseOffsets[targetTags]
 
-    for (let i = 0; i < indices.length; i++) {
-      this.a[indices[i]] = value
+    for (let i = 0; i < offsets.length; i++) {
+      this.a[offsets[i] + key] = value
     }
   }
 

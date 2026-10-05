@@ -157,7 +157,9 @@ export function resolveSimulationMetadata(
   }
 
   const simulation = { ...defaultSimulation }
-  simulation.teammates = getTeammates(teamSelection, customSimulation, defaultSimulation, buildOverride)
+  const teammates = getTeammates(teamSelection, customSimulation, defaultSimulation, buildOverride)
+  if (!teammates) return null
+  simulation.teammates = teammates
 
   // Non-DPS scoring always deprioritizes teammate buffs to isolate the support's own contribution
   if (SCORING_CONFIG_REGISTRY[configType].supportsDeprioritizeBuffs) {
@@ -176,11 +178,13 @@ export function getTeammates(
   customSimulation: NonNullable<ScoringMetadata['simulation']>,
   defaultSimulation: NonNullable<ScoringMetadata['simulation']>,
   buildOverride?: SavedBuild | null,
-): SimulationMetadata['teammates'] {
+): SimulationMetadata['teammates'] | null {
   if (buildOverride != undefined) {
     const teammates: SimulationMetadata['teammates'] = []
     for (const t of buildOverride.team) {
       if (t == null) continue
+      // Benchmark metadata requires a concrete cone. Never silently drop an incomplete teammate.
+      if (!t.lightCone) return null
       teammates.push({
         characterId: t.characterId,
         lightCone: t.lightCone,

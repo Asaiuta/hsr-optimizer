@@ -20,11 +20,13 @@ export class MinQueue {
   private _priorities: Float64Array
   private _hasPoppedElement: boolean
   private _KeyArray: typeof Uint32Array | typeof Float64Array
+  private readonly _preferSmallKey: boolean
   length: number
 
-  constructor(capacity: number, KeyArray: typeof Uint32Array | typeof Float64Array) {
+  constructor(capacity: number, KeyArray: typeof Uint32Array | typeof Float64Array, preferSmallKey = false) {
     this._capacity = capacity
     this._KeyArray = KeyArray
+    this._preferSmallKey = preferSmallKey
     this._keys = new KeyArray(capacity + 1)
     this._priorities = new Float64Array(capacity + 1)
     this._hasPoppedElement = false
@@ -97,7 +99,7 @@ export class MinQueue {
 
     while (pos > 1) {
       const parent = pos >>> 1
-      if (this._priorities[parent] <= priority) break
+      if (!this._less(key, priority, this._keys[parent], this._priorities[parent])) break
 
       this._keys[pos] = this._keys[parent]
       this._priorities[pos] = this._priorities[parent]
@@ -123,14 +125,14 @@ export class MinQueue {
       const right = left + 1
       if (right < limit) {
         const rightPriority = this._priorities[right]
-        if (rightPriority < childPriority) {
+        if (this._less(this._keys[right], rightPriority, childKey, childPriority)) {
           childPriority = rightPriority
           childKey = this._keys[right]
           childPos = right
         }
       }
 
-      if (childPriority >= priority) break
+      if (!this._less(childKey, childPriority, key, priority)) break
 
       this._keys[pos] = childKey
       this._priorities[pos] = childPriority
@@ -148,6 +150,12 @@ export class MinQueue {
       this._bubbleDown(1)
       this._hasPoppedElement = false
     }
+  }
+
+  /** The root is the worst retained item: low score, then large canonical key. */
+  private _less(leftKey: number, leftPriority: number, rightKey: number, rightPriority: number): boolean {
+    return leftPriority < rightPriority
+      || (this._preferSmallKey && leftPriority === rightPriority && leftKey > rightKey)
   }
 
   private _grow(): void {

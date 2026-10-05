@@ -15,6 +15,8 @@ export const STORAGE_STATE = path.join(
 export default defineConfig({
   timeout: 30000,
   testDir: './',
+  // GPU score regressions require their own harness and a real GPU-enabled browser.
+  testIgnore: ['**/Gpu/**'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

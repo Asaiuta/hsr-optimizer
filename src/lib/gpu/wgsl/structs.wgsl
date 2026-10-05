@@ -70,6 +70,8 @@ struct Params {
   batchOffset: u32,
   _pad0: u32,
   _pad1: u32,
+  tieH: u32, tieG: u32, tieB: u32, tieF: u32,
+  tieP: u32, tieL: u32, tieEnabled: u32, _tiePad: u32,
 }
 
 struct NaiveParams {
@@ -81,6 +83,8 @@ struct NaiveParams {
   xh: f32,
   threshold: f32,
   permLimit: u32,
+  tieH: u32, tieG: u32, tieB: u32, tieF: u32,
+  tieP: u32, tieL: u32, tieEnabled: u32, _tiePad: u32,
 }
 
 struct Assignment {
@@ -91,5 +95,5 @@ struct Assignment {
   pSize: u32, lSize: u32,
   permLimit: u32,
   startOffset: u32,
-  _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
+  xp: u32, xl: u32, _pad2: u32, _pad3: u32,
 }

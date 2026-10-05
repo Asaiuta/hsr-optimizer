@@ -42,4 +42,17 @@ describe('isSetSolutionValid', () => {
 
     expect(isSetSolutionValid(bitpacked, index)).toBe(true)
   })
+
+  it('preserves signed high bits and padded tails after typed-array cloning', () => {
+    const values = Array.from({ length: 97 }, (_, i) => Number([0, 31, 32, 63, 64, 95, 96].includes(i)))
+    const packed = bitpackBooleanArray(values)
+    const typed = Uint32Array.from(packed)
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const clone = structuredClone(typed)
+      for (let index = 0; index < 128; index++) {
+        expect(isSetSolutionValid(clone, index), `index ${index}`).toBe(values[index] === 1)
+      }
+      expect(typed.byteLength).toBe(16)
+    }
+  })
 })

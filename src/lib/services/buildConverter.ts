@@ -49,7 +49,7 @@ export function serializeFromOptimizer(
   equipped: Build,
 ): OptimizerSavedBuild {
   function serializeTeammate(tm: TeammateState): SavedTeammateWithConditionals | null {
-    if (!tm.characterId || !tm.lightCone) return null
+    if (!tm.characterId) return null
     return {
       characterId: tm.characterId,
       characterEidolon: tm.characterEidolon,

@@ -1,13 +1,8 @@
-import { Constants } from 'lib/constants/constants'
+import { isCpuFilterDisabled } from 'lib/optimization/cpuFilterBounds'
 import {
   type BasicStatsArray,
   BasicStatsArrayCore,
 } from 'lib/optimization/basicStatsArray'
-import {
-  BasicKey,
-  type BasicKeyType,
-} from 'lib/optimization/basicStatsArray'
-import { BufferPacker } from 'lib/optimization/bufferPacker'
 import { calculateBaseMultis } from 'lib/optimization/calculateDamage'
 import {
   calculateBaseStats,
@@ -18,6 +13,12 @@ import {
   calculateRelicStats,
 } from 'lib/optimization/calculateStats'
 import { resetConditionalState } from 'lib/optimization/conditionalStateUtils'
+import { getCpuActionPlan } from 'lib/optimization/cpuActionPlan'
+import {
+  type BasicStatTransform,
+  createCpuResultScore,
+  getMemoBasicStatTransform,
+} from 'lib/optimization/cpuResultScore'
 import {
   GlobalRegister,
   StatKey,
@@ -32,6 +33,10 @@ import {
   calculateEhp,
   getDamageFunction,
 } from 'lib/optimization/engine/damage/damageCalculator'
+import {
+  createResultTieOrder,
+  OptimizerResultQueue,
+} from 'lib/optimization/resultTieOrder'
 import { AbilityMeta } from 'lib/optimization/rotation/turnAbilityConfig'
 import {
   computeSetMatchesInPlace,
@@ -41,7 +46,6 @@ import {
 import { isSetSolutionValid } from 'lib/optimization/setSolutionBitset'
 import {
   SortOption,
-  type SortOptionProperties,
 } from 'lib/optimization/sortOptions'
 import {
   encodeOrnamentSetIndex,
@@ -52,31 +56,27 @@ import {
   type SetsRelics,
 } from 'lib/sets/setConfigRegistry'
 import { initializeContextConditionals } from 'lib/simulations/contextConditionals'
-import { type SimulationRelicArrayByPart } from 'lib/simulations/statSimulationTypes'
+import type { OptimizerWorkerRelics } from 'lib/worker/optimizerWorkerRelics'
 import type { BaseWorkerInput } from 'lib/worker/workerPool'
 import type { WorkerType } from 'lib/worker/workerUtils'
 import { type Form } from 'types/form'
 import { type OptimizerContext } from 'types/optimizer'
-import { type Relic } from 'types/relic'
 
 export interface OptimizerWorkerInput extends BaseWorkerInput, OptimizerEventData {
   workerType: WorkerType.OPTIMIZER
 }
 
+export type OptimizerWorkerResult = {
+  /** Interleaved global permutation index and float32-rounded score; 16 bytes per candidate. */
+  candidates: Float64Array,
+}
+
 type OptimizerEventData = {
-  relics: {
-    LinkRope: Relic[],
-    PlanarSphere: Relic[],
-    Feet: Relic[],
-    Body: Relic[],
-    Hands: Relic[],
-    Head: Relic[],
-  },
+  relics: OptimizerWorkerRelics,
   request: Form,
   context: OptimizerContext,
-  buffer: ArrayBuffer,
-  relicSetSolutions: number[],
-  ornamentSetSolutions: number[],
+  relicSetSolutions: readonly number[] | Uint32Array,
+  ornamentSetSolutions: readonly number[] | Uint32Array,
   permutations: number,
   WIDTH: number,
   skip: number,
@@ -90,15 +90,16 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
   const request: Form = data.request
   const context: OptimizerContext = data.context
 
-  const relics = data.relics as SimulationRelicArrayByPart
-  const arr = new Float32Array(data.buffer)
+  const relics = data.relics
+  const resultsLimit = request.resultsLimit ?? 1024
+  const results = new OptimizerResultQueue(Math.min(resultsLimit, data.WIDTH), createResultTieOrder(data.relics))
+  let threshold = request.resultMinFilter ?? Number.NEGATIVE_INFINITY
 
   const lSize = relics.LinkRope.length
   const pSize = relics.PlanarSphere.length
   const fSize = relics.Feet.length
   const bSize = relics.Body.length
   const gSize = relics.Hands.length
-  const hSize = relics.Head.length
 
   const relicSetSolutions = data.relicSetSolutions
   const ornamentSetSolutions = data.ornamentSetSolutions
@@ -106,9 +107,9 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
   const combatDisplay = request.statDisplay === 'combat'
   const baseDisplay = !combatDisplay
   const memoDisplay = request.memoDisplay === 'memo'
-  let passCount = 0
 
   initializeContextConditionals(context)
+  const { defaultActionCount, rotationActionCount } = getCpuActionPlan(request, context)
 
   const limit = Math.min(data.permutations, data.WIDTH)
 
@@ -134,10 +135,11 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
   const memoEntity = memoDisplay && memospriteEntityIndex >= 0 && displayConfig
     ? displayConfig.entitiesArray[memospriteEntityIndex]
     : undefined
-  const { failsBasicThresholdFilter, failsComputedThresholdFilter } = generateResultMinFilter(request, context, displayEntityIndex, memoEntity)
+  const score = createCpuResultScore(request, context, displayEntityIndex, memoEntity)
 
   const failsCombatStatsFilter = combatStatsFilter(request)
   const failsBasicStatsFilter = basicStatsFilter(request, memoEntity)
+  const needsEhp = request.trace || request.resultSort === 'EHP' || !isCpuFilterDisabled(request.minEhp, request.maxEhp)
   const failsEhpFilter = ehpFilter(request, displayEntityIndex)
   const failsRatingFilter = ratingFilter(request, context)
   const rotationActionOutputTags = context.rotationActions.map((action) => AbilityMeta[action.actionType].outputTag)
@@ -146,6 +148,26 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
   const sets = Array.from<number>({ length: 6 })
   const setMatches: MutableSetMatches = emptySetMatches()
 
+  const headSets = relics.Head.map((r) => RelicSetToIndex[r.set as SetsRelics])
+  const handSets = relics.Hands.map((r) => RelicSetToIndex[r.set as SetsRelics])
+  const bodySets = relics.Body.map((r) => RelicSetToIndex[r.set as SetsRelics])
+  const feetSets = relics.Feet.map((r) => RelicSetToIndex[r.set as SetsRelics])
+  const sphereSets = relics.PlanarSphere.map((r) => OrnamentSetToIndex[r.set as SetsOrnaments])
+  const ropeSets = relics.LinkRope.map((r) => OrnamentSetToIndex[r.set as SetsOrnaments])
+
+  // Decode the batch origin once, without truncating global indices to 32 bits.
+  let cursor = data.skip
+  let l = cursor % lSize
+  cursor = (cursor - l) / lSize
+  let p = cursor % pSize
+  cursor = (cursor - p) / pSize
+  let f = cursor % fSize
+  cursor = (cursor - f) / fSize
+  let b = cursor % bSize
+  cursor = (cursor - b) / bSize
+  let g = cursor % gSize
+  let h = (cursor - g) / gSize
+
   for (let col = 0; col < limit; col++) {
     const index = data.skip + col
 
@@ -153,14 +175,23 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
       break
     }
 
-    const l = index % lSize
-    const p = ((index - l) / lSize) % pSize
-    const f = ((index - p * lSize - l) / (lSize * pSize)) % fSize
-    const b = ((index - f * pSize * lSize - p * lSize - l) / (lSize * pSize * fSize)) % bSize
-    const g = ((index - b * fSize * pSize * lSize - f * pSize * lSize - p * lSize - l) / (lSize * pSize * fSize * bSize)) % gSize
-    const h =
-      ((index - g * bSize * fSize * pSize * lSize - b * fSize * pSize * lSize - f * pSize * lSize - p * lSize - l) / (lSize * pSize * fSize * bSize * gSize))
-      % hSize
+    // Advance before evaluating so every early filter exit still consumes its index.
+    if (col > 0 && ++l === lSize) {
+      l = 0
+      if (++p === pSize) {
+        p = 0
+        if (++f === fSize) {
+          f = 0
+          if (++b === bSize) {
+            b = 0
+            if (++g === gSize) {
+              g = 0
+              h++
+            }
+          }
+        }
+      }
+    }
 
     const head = relics.Head[h]
     const hands = relics.Hands[g]
@@ -169,12 +200,12 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
     const planarSphere = relics.PlanarSphere[p]
     const linkRope = relics.LinkRope[l]
 
-    const setH = RelicSetToIndex[head.set as SetsRelics]
-    const setG = RelicSetToIndex[hands.set as SetsRelics]
-    const setB = RelicSetToIndex[body.set as SetsRelics]
-    const setF = RelicSetToIndex[feet.set as SetsRelics]
-    const setP = OrnamentSetToIndex[planarSphere.set as SetsOrnaments]
-    const setL = OrnamentSetToIndex[linkRope.set as SetsOrnaments]
+    const setH = headSets[h]
+    const setG = handSets[g]
+    const setB = bodySets[b]
+    const setF = feetSets[f]
+    const setP = sphereSets[p]
+    const setL = ropeSets[l]
 
     const relicSetIndex = encodeRelicSetIndex(setH, setG, setB, setF)
     const ornamentSetIndex = encodeOrnamentSetIndex(setP, setL)
@@ -202,7 +233,7 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
     calculateElementalStats(c, context)
 
     // Exit early on base display filters failing
-    if (baseDisplay && (failsBasicThresholdFilter(c.a) || failsBasicStatsFilter(c))) {
+    if (baseDisplay && ((score.basic && score.basic(c.a) < threshold) || failsBasicStatsFilter(c))) {
       continue
     }
 
@@ -215,7 +246,7 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
     let comboBuff = 0
 
     // Calculate rotation actions for combo damage
-    for (let i = 0; i < context.rotationActions.length; i++) {
+    for (let i = 0; i < rotationActionCount; i++) {
       const action = context.rotationActions[i]
       const actionOutputTag = rotationActionOutputTags[i]
       x.setConfig(action.config)
@@ -255,7 +286,7 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
     }
 
     // Calculate default actions for display stats and store in registers
-    for (let i = 0; i < context.defaultActions.length; i++) {
+    for (let i = 0; i < defaultActionCount; i++) {
       const action = context.defaultActions[i]
       const actionOutputTag = defaultActionOutputTags[i]
       x.setConfig(action.config)
@@ -288,7 +319,7 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
       x.setActionRegisterValue(action.registerIndex, actionOutput)
     }
 
-    calculateEhp(x, context)
+    if (needsEhp) calculateEhp(x, context)
 
     x.setGlobalRegisterValue(GlobalRegister.COMBO_DMG, comboDmg)
     x.setGlobalRegisterValue(GlobalRegister.COMBO_HEAL, comboHeal)
@@ -311,18 +342,22 @@ export function optimizerWorker(e: MessageEvent<OptimizerWorkerInput>) {
     }
 
     // Computed rating threshold filter (rising floor from priority queue)
-    if (failsComputedThresholdFilter(x)) {
+    const value = score.computed(x)
+    if (Number.isNaN(value) || value < threshold) {
       continue
     }
 
-    BufferPacker.packCharacterContainer(arr, passCount, x, c, context, memospriteEntityIndex)
-    passCount++
+    results.fixedSizePush(index, value)
+    if (results.size() >= results.limit) threshold = Math.max(threshold, results.topPriority())
   }
 
-  self.postMessage({
-    rows: [],
-    buffer: data.buffer,
-  }, [data.buffer])
+  const retained = results.toResults()
+  const candidates = new Float64Array(retained.length * 2)
+  retained.forEach(({ index, value }, i) => {
+    candidates[2 * i] = index
+    candidates[2 * i + 1] = value
+  })
+  self.postMessage({ candidates }, [candidates.buffer])
 }
 
 function addBasicConditionIfNeeded(
@@ -332,7 +367,7 @@ function addBasicConditionIfNeeded(
   max: number,
   transform?: BasicStatTransform,
 ) {
-  if (min === 0 && max === Constants.MAX_INT) return
+  if (isCpuFilterDisabled(min, max)) return
 
   if (!transform) {
     conditions.push((c) => c.a[statKey] < min || c.a[statKey] > max)
@@ -346,35 +381,13 @@ function addBasicConditionIfNeeded(
   })
 }
 
-type BasicStatTransform = readonly [scale: number, flat: number]
-
-function getMemoBasicStatTransform(
-  statKey: number,
-  memoEntity?: OptimizerEntity,
-): BasicStatTransform | undefined {
-  if (!memoEntity) return undefined
-
-  switch (statKey) {
-    case StatKey.HP:
-      return [memoEntity.memoBaseHpScaling ?? 0, memoEntity.memoBaseHpFlat ?? 0]
-    case StatKey.ATK:
-      return [memoEntity.memoBaseAtkScaling ?? 0, memoEntity.memoBaseAtkFlat ?? 0]
-    case StatKey.DEF:
-      return [memoEntity.memoBaseDefScaling ?? 0, memoEntity.memoBaseDefFlat ?? 0]
-    case StatKey.SPD:
-      return [memoEntity.memoBaseSpdScaling ?? 0, memoEntity.memoBaseSpdFlat ?? 0]
-    default:
-      return undefined
-  }
-}
-
 function addCombatConditionIfNeeded(
   conditions: ((x: ComputedStatsContainer, entityIndex: number) => boolean)[],
   statKey: StatKeyValue,
   min: number,
   max: number,
 ) {
-  if (min !== 0 || max !== Constants.MAX_INT) {
+  if (!isCpuFilterDisabled(min, max)) {
     conditions.push((x, entityIndex) => {
       const entityName = x.config.entitiesArray[entityIndex].name
       const value = x.getActionValue(statKey, entityName)
@@ -390,7 +403,7 @@ function addCombatBoostedConditionIfNeeded(
   min: number,
   max: number,
 ) {
-  if (min !== 0 || max !== Constants.MAX_INT) {
+  if (!isCpuFilterDisabled(min, max)) {
     conditions.push((x, entityIndex) => {
       const entityName = x.config.entitiesArray[entityIndex].name
       const value = x.getActionValue(statKey, entityName) + x.getActionValue(boostKey, entityName)
@@ -440,7 +453,7 @@ function ehpFilter(request: Form, displayEntityIndex: number) {
   const minEhp = request.minEhp
   const maxEhp = request.maxEhp
 
-  if (minEhp === 0 && maxEhp === Constants.MAX_INT) {
+  if (isCpuFilterDisabled(minEhp, maxEhp)) {
     return () => false
   }
 
@@ -458,7 +471,7 @@ function ratingFilter(request: Form, context: OptimizerContext) {
 
     const min = request[sortOption.minFilterKey as keyof Form] as number
     const max = request[sortOption.maxFilterKey as keyof Form] as number
-    if (min === 0 && max === Constants.MAX_INT) continue
+    if (isCpuFilterDisabled(min, max)) continue
 
     const action = context.defaultActions.find((a) => a.actionName === sortOption.key)
     if (!action) continue
@@ -475,51 +488,4 @@ function ratingFilter(request: Form, context: OptimizerContext) {
   }
 
   return (x: ComputedStatsContainer) => conditions.some((condition) => condition(x))
-}
-
-// Returns threshold filters that skip builds whose sort value is below the rising min floor.
-// Basic stats can be checked before simulation (early exit), computed ratings only after.
-function generateResultMinFilter(
-  request: Form,
-  context: OptimizerContext,
-  displayEntityIndex: number,
-  memoEntity?: OptimizerEntity,
-) {
-  const threshold = request.resultMinFilter
-  const sortOption = SortOption[request.resultSort!] as SortOptionProperties
-  const pass = () => false
-
-  if (!sortOption.isComputedRating) {
-    const key = BasicKey[sortOption.key as BasicKeyType]
-    const transform = getMemoBasicStatTransform(key, memoEntity)
-    const getValue = transform
-      ? (c: Float32Array) => transform[0] * c[key] + transform[1]
-      : (c: Float32Array) => c[key]
-    return {
-      failsBasicThresholdFilter: (c: Float32Array) => getValue(c) < threshold,
-      failsComputedThresholdFilter: pass,
-    }
-  }
-
-  let getComputedValue: (x: ComputedStatsContainer) => number
-
-  if (sortOption.statKey != null) {
-    const statKey = sortOption.statKey
-    getComputedValue = (x) => x.getActionValueByIndex(statKey, displayEntityIndex)
-  } else if (sortOption.globalRegisterIndex != null) {
-    const globalRegisterIndex = sortOption.globalRegisterIndex
-    getComputedValue = (x) => x.getGlobalRegisterValue(globalRegisterIndex)
-  } else {
-    const action = context.defaultActions.find((a) => a.actionName === sortOption.key)
-    if (!action) {
-      return { failsBasicThresholdFilter: pass, failsComputedThresholdFilter: pass }
-    }
-    const registerIndex = action.registerIndex
-    getComputedValue = (x) => x.getActionRegisterValue(registerIndex)
-  }
-
-  return {
-    failsBasicThresholdFilter: pass,
-    failsComputedThresholdFilter: (x: ComputedStatsContainer) => getComputedValue(x) < threshold,
-  }
 }

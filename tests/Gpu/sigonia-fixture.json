@@ -1,0 +1,897 @@
+{
+  "form": {
+    "characterEidolon": 2,
+    "characterId": "1506",
+    "characterLevel": 80,
+    "lightCone": "21064",
+    "lightConeLevel": 80,
+    "lightConeSuperimposition": 5,
+    "enemyCount": 1,
+    "enemyElementalWeak": true,
+    "enemyLevel": 95,
+    "enemyMaxToughness": 360,
+    "enemyResistance": 0.2,
+    "enemyEffectResistance": 0.3,
+    "enemyWeaknessBroken": false,
+    "characterConditionals": {
+      "godmodePlayer": true,
+      "certifiedBanger": true,
+      "punchlineStacks": 30,
+      "certifiedBangerStacks": 60,
+      "hiddenMmr": 120,
+      "spdToElation": true,
+      "e1Vulnerability": true,
+      "e4PunchlineBoost": true,
+      "e6Merrymake": true,
+      "e6ResPen": true
+    },
+    "lightConeConditionals": {
+      "elationVulnerability": true
+    },
+    "setConditionals": {
+      "Passerby of Wandering Cloud": [
+        null,
+        true
+      ],
+      "Musketeer of Wild Wheat": [
+        null,
+        true
+      ],
+      "Knight of Purity Palace": [
+        null,
+        true
+      ],
+      "Hunter of Glacial Forest": [
+        null,
+        true
+      ],
+      "Champion of Streetwise Boxing": [
+        null,
+        5
+      ],
+      "Guard of Wuthering Snow": [
+        null,
+        true
+      ],
+      "Firesmith of Lava-Forging": [
+        null,
+        true
+      ],
+      "Genius of Brilliant Stars": [
+        null,
+        false
+      ],
+      "Band of Sizzling Thunder": [
+        null,
+        true
+      ],
+      "Eagle of Twilight Line": [
+        null,
+        true
+      ],
+      "Thief of Shooting Meteor": [
+        null,
+        true
+      ],
+      "Wastelander of Banditry Desert": [
+        null,
+        1
+      ],
+      "Longevous Disciple": [
+        null,
+        2
+      ],
+      "Messenger Traversing Hackerspace": [
+        null,
+        false
+      ],
+      "The Ashblazing Grand Duke": [
+        null,
+        0
+      ],
+      "Prisoner in Deep Confinement": [
+        null,
+        0
+      ],
+      "Pioneer Diver of Dead Waters": [
+        null,
+        2
+      ],
+      "Watchmaker, Master of Dream Machinations": [
+        null,
+        false
+      ],
+      "Iron Cavalry Against the Scourge": [
+        null,
+        true
+      ],
+      "The Wind-Soaring Valorous": [
+        null,
+        false
+      ],
+      "Sacerdos' Relived Ordeal": [
+        null,
+        0
+      ],
+      "Scholar Lost in Erudition": [
+        null,
+        true
+      ],
+      "Hero of Triumphant Song": [
+        null,
+        false
+      ],
+      "Poet of Mourning Collapse": [
+        null,
+        true
+      ],
+      "Warrior Goddess of Sun and Thunder": [
+        null,
+        false
+      ],
+      "Wavestrider Captain": [
+        null,
+        true
+      ],
+      "World-Remaking Deliverer": [
+        null,
+        false
+      ],
+      "Self-Enshrouded Recluse": [
+        null,
+        true
+      ],
+      "Ever-Glorious Magical Girl": [
+        null,
+        10
+      ],
+      "Diviner of Distant Reach": [
+        null,
+        true
+      ],
+      "As Navigator Isee Sees It": [
+        null,
+        1
+      ],
+      "Divine-Querying Master Smith": [
+        null,
+        0
+      ],
+      "Dreamlit Actor": [
+        null,
+        2
+      ],
+      "The Edacious Heretic": [
+        null,
+        true
+      ],
+      "Space Sealing Station": [
+        null,
+        true
+      ],
+      "Fleet of the Ageless": [
+        null,
+        true
+      ],
+      "Belobog of the Architects": [
+        null,
+        true
+      ],
+      "Pan-Cosmic Commercial Enterprise": [
+        null,
+        true
+      ],
+      "Inert Salsotto": [
+        null,
+        true
+      ],
+      "Celestial Differentiator": [
+        null,
+        false
+      ],
+      "Sprightly Vonwacq": [
+        null,
+        true
+      ],
+      "Talia: Kingdom of Banditry": [
+        null,
+        true
+      ],
+      "Broken Keel": [
+        null,
+        true
+      ],
+      "Rutilant Arena": [
+        null,
+        true
+      ],
+      "Penacony, Land of the Dreams": [
+        null,
+        true
+      ],
+      "Firmament Frontline: Glamoth": [
+        null,
+        true
+      ],
+      "Izumo Gensei and Takama Divine Realm": [
+        null,
+        true
+      ],
+      "Sigonia, the Unclaimed Desolation": [
+        null,
+        4
+      ],
+      "Forge of the Kalpagni Lantern": [
+        null,
+        false
+      ],
+      "Duran, Dynasty of Running Wolves": [
+        null,
+        5
+      ],
+      "The Wondrous BananAmusement Park": [
+        null,
+        false
+      ],
+      "Lushaka, the Sunken Seas": [
+        null,
+        true
+      ],
+      "Giant Tree of Rapt Brooding": [
+        null,
+        true
+      ],
+      "Bone Collection's Serene Demesne": [
+        null,
+        true
+      ],
+      "Revelry by the Sea": [
+        null,
+        true
+      ],
+      "Arcadia of Woven Dreams": [
+        null,
+        4
+      ],
+      "Tengoku@Livestream": [
+        null,
+        false
+      ],
+      "Amphoreus, The Eternal Land": [
+        null,
+        false
+      ],
+      "City of Converging Stars": [
+        null,
+        3
+      ],
+      "Punklorde Stage Zero": [
+        null,
+        true
+      ],
+      "Fallen Star Anchorage": [
+        null,
+        false
+      ],
+      "Cosmic Life Sciences Institute": [
+        null,
+        true
+      ]
+    },
+    "enhance": 9,
+    "grade": 5,
+    "rank": 1,
+    "exclude": [],
+    "includeEquippedRelics": true,
+    "keepCurrentRelics": false,
+    "mainBody": [
+      "CRIT Rate",
+      "CRIT DMG"
+    ],
+    "mainFeet": [
+      "SPD"
+    ],
+    "mainHands": [],
+    "mainHead": [],
+    "mainLinkRope": [
+      "HP%",
+      "ATK%",
+      "DEF%",
+      "Break Effect",
+      "Energy Regeneration Rate"
+    ],
+    "mainPlanarSphere": [
+      "HP%",
+      "ATK%",
+      "DEF%",
+      "Physical DMG Boost",
+      "Fire DMG Boost",
+      "Ice DMG Boost",
+      "Lightning DMG Boost",
+      "Wind DMG Boost",
+      "Quantum DMG Boost",
+      "Imaginary DMG Boost"
+    ],
+    "mainStatUpscaleLevel": 15,
+    "rankFilter": true,
+    "relicSets": [],
+    "ornamentSets": [],
+    "setFilters": {
+      "fourPiece": [],
+      "twoPieceCombos": [],
+      "ornaments": []
+    },
+    "statDisplay": "combat",
+    "memoDisplay": "summoner",
+    "weights": {
+      "ATK": 0,
+      "ATK%": 0,
+      "DEF": 0,
+      "DEF%": 0,
+      "HP": 0,
+      "HP%": 0,
+      "SPD": 1,
+      "CRIT Rate": 1,
+      "CRIT DMG": 1,
+      "Effect Hit Rate": 0,
+      "Effect RES": 0,
+      "Break Effect": 0
+    },
+    "combatBuffs": {
+      "ATK": 0,
+      "ATK_P": 0,
+      "HP": 0,
+      "HP_P": 0,
+      "DEF": 0,
+      "DEF_P": 0,
+      "CR": 0,
+      "CD": 0,
+      "SPD": 0,
+      "SPD_P": 0,
+      "BE": 0,
+      "EHR": 0,
+      "BOOST": 0,
+      "DEF_PEN": 0,
+      "RES_PEN": 0,
+      "EFFECT_RES_PEN": 0,
+      "VULNERABILITY": 0,
+      "BREAK_EFFICIENCY": 0
+    },
+    "comboStateJson": "{}",
+    "comboTurnAbilities": [
+      "NULL",
+      "START_ULT",
+      "END_BASIC",
+      "WHOLE_UNIQUE",
+      "WHOLE_UNIQUE",
+      "WHOLE_ELATION_SKILL",
+      "WHOLE_BASIC",
+      "WHOLE_UNIQUE",
+      "WHOLE_UNIQUE",
+      "WHOLE_BASIC",
+      "WHOLE_UNIQUE",
+      "WHOLE_UNIQUE",
+      "WHOLE_ELATION_SKILL"
+    ],
+    "comboPreprocessor": true,
+    "comboType": "simple",
+    "resultSort": "COMBO",
+    "resultsLimit": 1024,
+    "deprioritizeBuffs": false,
+    "resultMinFilter": 0,
+    "teammate0": {
+      "characterEidolon": 0,
+      "lightConeSuperimposition": 1,
+      "characterConditionals": {},
+      "lightConeConditionals": {}
+    },
+    "teammate1": {
+      "characterEidolon": 0,
+      "lightConeSuperimposition": 1,
+      "characterConditionals": {},
+      "lightConeConditionals": {}
+    },
+    "teammate2": {
+      "characterEidolon": 0,
+      "lightConeSuperimposition": 1,
+      "characterConditionals": {},
+      "lightConeConditionals": {}
+    }
+  },
+  "relics": {
+    "LinkRope": {
+      "id": "sigonia-regression-LinkRope",
+      "part": "LinkRope",
+      "set": "Punklorde Stage Zero",
+      "grade": 5,
+      "enhance": 15,
+      "main": {
+        "stat": "DEF%",
+        "value": 54
+      },
+      "substats": [
+        {
+          "stat": "ATK",
+          "value": 21.16877
+        },
+        {
+          "stat": "SPD",
+          "value": 9.5
+        },
+        {
+          "stat": "CRIT DMG",
+          "value": 6.48
+        },
+        {
+          "stat": "Break Effect",
+          "value": 16.2
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 4,
+      "augmentedStats": {
+        "mainStat": "DEF%",
+        "mainValue": 0.54,
+        "ATK": 21.16877,
+        "SPD": 9.5,
+        "CRIT DMG": 0.06480000000000001,
+        "Break Effect": 0.162,
+        "ATK%": 0,
+        "CRIT Rate": 0,
+        "DEF%": 0,
+        "DEF": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP%": 0,
+        "HP": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "Effect RES": 0,
+        "SPD%": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 6,
+      "condensedStats": [
+        [
+          5,
+          21.16877
+        ],
+        [
+          7,
+          9.5
+        ],
+        [
+          9,
+          0.0648
+        ],
+        [
+          12,
+          0.162
+        ],
+        [
+          2,
+          0.54
+        ]
+      ]
+    },
+    "PlanarSphere": {
+      "id": "sigonia-regression-PlanarSphere",
+      "part": "PlanarSphere",
+      "set": "Punklorde Stage Zero",
+      "grade": 5,
+      "enhance": 15,
+      "main": {
+        "stat": "Imaginary DMG Boost",
+        "value": 38.8803
+      },
+      "substats": [
+        {
+          "stat": "HP",
+          "value": 33.87004
+        },
+        {
+          "stat": "SPD",
+          "value": 6.9
+        },
+        {
+          "stat": "Effect RES",
+          "value": 4.32
+        },
+        {
+          "stat": "CRIT Rate",
+          "value": 7.776
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 3,
+      "augmentedStats": {
+        "mainStat": "Imaginary DMG Boost",
+        "mainValue": 0.388803,
+        "HP": 33.87004,
+        "SPD": 6.9,
+        "Effect RES": 0.0432,
+        "CRIT Rate": 0.07776,
+        "ATK%": 0,
+        "ATK": 0,
+        "Break Effect": 0,
+        "CRIT DMG": 0,
+        "DEF%": 0,
+        "DEF": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP%": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "SPD%": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 6.45,
+      "condensedStats": [
+        [
+          4,
+          33.87004
+        ],
+        [
+          7,
+          6.9
+        ],
+        [
+          11,
+          0.0432
+        ],
+        [
+          8,
+          0.07776
+        ],
+        [
+          21,
+          0.388803
+        ]
+      ]
+    },
+    "Feet": {
+      "id": "sigonia-regression-Feet",
+      "part": "Feet",
+      "set": "Ever-Glorious Magical Girl",
+      "grade": 5,
+      "enhance": 15,
+      "main": {
+        "stat": "SPD",
+        "value": 25.032
+      },
+      "substats": [
+        {
+          "stat": "ATK",
+          "value": 19.05189
+        },
+        {
+          "stat": "HP%",
+          "value": 7.344
+        },
+        {
+          "stat": "CRIT DMG",
+          "value": 23.976
+        },
+        {
+          "stat": "Break Effect",
+          "value": 12.96
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 4,
+      "augmentedStats": {
+        "mainStat": "SPD",
+        "mainValue": 25.032,
+        "ATK": 19.05189,
+        "HP%": 0.07344,
+        "CRIT DMG": 0.23976,
+        "Break Effect": 0.12960000000000002,
+        "ATK%": 0,
+        "CRIT Rate": 0,
+        "DEF%": 0,
+        "DEF": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "Effect RES": 0,
+        "SPD%": 0,
+        "SPD": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 4.625,
+      "condensedStats": [
+        [
+          5,
+          19.05189
+        ],
+        [
+          0,
+          0.07344
+        ],
+        [
+          9,
+          0.23976
+        ],
+        [
+          12,
+          0.1296
+        ],
+        [
+          7,
+          25.032
+        ]
+      ]
+    },
+    "Body": {
+      "id": "sigonia-regression-Body",
+      "part": "Body",
+      "set": "Ever-Glorious Magical Girl",
+      "grade": 5,
+      "enhance": 15,
+      "main": {
+        "stat": "CRIT DMG",
+        "value": 64.8
+      },
+      "substats": [
+        {
+          "stat": "HP%",
+          "value": 4.32
+        },
+        {
+          "stat": "ATK%",
+          "value": 3.456
+        },
+        {
+          "stat": "SPD",
+          "value": 4
+        },
+        {
+          "stat": "CRIT Rate",
+          "value": 14.58
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 4,
+      "augmentedStats": {
+        "mainStat": "CRIT DMG",
+        "mainValue": 0.648,
+        "HP%": 0.0432,
+        "ATK%": 0.03456,
+        "SPD": 4,
+        "CRIT Rate": 0.1458,
+        "ATK": 0,
+        "Break Effect": 0,
+        "CRIT DMG": 0,
+        "DEF%": 0,
+        "DEF": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "Effect RES": 0,
+        "SPD%": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 7.625,
+      "condensedStats": [
+        [
+          0,
+          0.0432
+        ],
+        [
+          1,
+          0.03456
+        ],
+        [
+          7,
+          4
+        ],
+        [
+          8,
+          0.1458
+        ],
+        [
+          9,
+          0.648
+        ]
+      ]
+    },
+    "Hands": {
+      "id": "sigonia-regression-Hands",
+      "part": "Hands",
+      "set": "Guard of Wuthering Snow",
+      "grade": 5,
+      "enhance": 9,
+      "main": {
+        "stat": "ATK",
+        "value": 234.2592
+      },
+      "substats": [
+        {
+          "stat": "HP",
+          "value": 84.6751
+        },
+        {
+          "stat": "ATK%",
+          "value": 7.344
+        },
+        {
+          "stat": "SPD",
+          "value": 4.3
+        },
+        {
+          "stat": "CRIT DMG",
+          "value": 5.832
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 4,
+      "augmentedStats": {
+        "mainStat": "ATK",
+        "mainValue": 352.8,
+        "HP": 84.6751,
+        "ATK%": 0.07344,
+        "SPD": 4.3,
+        "CRIT DMG": 0.05832,
+        "ATK": 0,
+        "Break Effect": 0,
+        "CRIT Rate": 0,
+        "DEF%": 0,
+        "DEF": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP%": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "Effect RES": 0,
+        "SPD%": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 3.275,
+      "condensedStats": [
+        [
+          4,
+          84.6751
+        ],
+        [
+          1,
+          0.07344
+        ],
+        [
+          7,
+          4.3
+        ],
+        [
+          9,
+          0.05832
+        ],
+        [
+          5,
+          352.8
+        ]
+      ]
+    },
+    "Head": {
+      "id": "sigonia-regression-Head",
+      "part": "Head",
+      "set": "Guard of Wuthering Snow",
+      "grade": 5,
+      "enhance": 15,
+      "main": {
+        "stat": "HP",
+        "value": 705.6
+      },
+      "substats": [
+        {
+          "stat": "DEF",
+          "value": 19.05189
+        },
+        {
+          "stat": "HP%",
+          "value": 8.208
+        },
+        {
+          "stat": "CRIT DMG",
+          "value": 11.016
+        },
+        {
+          "stat": "Effect RES",
+          "value": 11.232
+        }
+      ],
+      "previewSubstats": [],
+      "initialRolls": 3,
+      "augmentedStats": {
+        "mainStat": "HP",
+        "mainValue": 705.6,
+        "DEF": 19.05189,
+        "HP%": 0.08208,
+        "CRIT DMG": 0.11016,
+        "Effect RES": 0.11231999999999999,
+        "ATK%": 0,
+        "ATK": 0,
+        "Break Effect": 0,
+        "CRIT Rate": 0,
+        "DEF%": 0,
+        "Effect Hit Rate": 0,
+        "Energy Regeneration Rate": 0,
+        "Fire DMG Boost": 0,
+        "HP": 0,
+        "Ice DMG Boost": 0,
+        "Imaginary DMG Boost": 0,
+        "Lightning DMG Boost": 0,
+        "Outgoing Healing Boost": 0,
+        "Physical DMG Boost": 0,
+        "Quantum DMG Boost": 0,
+        "SPD%": 0,
+        "SPD": 0,
+        "Wind DMG Boost": 0,
+        "Elation": 0
+      },
+      "weightScore": 2.125,
+      "condensedStats": [
+        [
+          6,
+          19.05189
+        ],
+        [
+          0,
+          0.08208
+        ],
+        [
+          9,
+          0.11016
+        ],
+        [
+          11,
+          0.11232
+        ],
+        [
+          4,
+          705.6
+        ]
+      ]
+    }
+  },
+  "counts": {
+    "Head": 127,
+    "Hands": 107,
+    "Body": 49,
+    "Feet": 44,
+    "PlanarSphere": 95,
+    "LinkRope": 101
+  }
+}

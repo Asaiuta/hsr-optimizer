@@ -14,6 +14,7 @@ import type {
   OptimizerDisplayData,
   OptimizerDisplayDataStatSim,
 } from 'lib/optimization/bufferPacker'
+import { createResultTieOrder } from 'lib/optimization/resultTieOrder'
 import {
   columnsToAggregateMap,
   getGridColumn,
@@ -60,6 +61,7 @@ const controllerState: {
   filteredIndices: number[],
   filterModel: Form | undefined,
   sortModel: SortModel,
+  selectionScores: { column: string, scores: ReadonlyMap<number, number> } | undefined,
 } = {
   relics: { Head: [], Hands: [], Body: [], Feet: [], PlanarSphere: [], LinkRope: [] },
   permutationSizes: { hSize: 0, gSize: 0, bSize: 0, fSize: 0, pSize: 0, lSize: 0 },
@@ -68,6 +70,7 @@ const controllerState: {
   filteredIndices: [],
   filterModel: undefined,
   sortModel: { colId: '', sort: null },
+  selectionScores: undefined,
 }
 
 const columnsToAggregate = Object.keys(columnsToAggregateMap)
@@ -82,8 +85,9 @@ export const OptimizerTabController = {
     return controllerState.aggregations
   },
 
-  setRows: (newRows: OptimizerDisplayData[]) => {
+  setRows: (newRows: OptimizerDisplayData[], selectionScores?: { column: string, scores: ReadonlyMap<number, number> }) => {
     controllerState.rows = newRows
+    controllerState.selectionScores = selectionScores
   },
 
   setTopRow: (row: OptimizerDisplayData, overwrite = false) => {
@@ -345,10 +349,15 @@ function aggregate(subArray: OptimizerDisplayData[]) {
 function sort() {
   const colId = controllerState.sortModel.colId as keyof OptimizerDisplayData
   const desc = controllerState.sortModel.sort === 'desc'
+  const tieOrder = createResultTieOrder(controllerState.relics)
+  // Re-sorting the search objective must retain the scores used for selection.
+  // GPU rows are freshly simulated on CPU and can differ below f32 precision.
+  const scores = controllerState.selectionScores?.column === colId ? controllerState.selectionScores.scores : undefined
   controllerState.rows.sort((a, b) => {
-    const aVal = a[colId] as number
-    const bVal = b[colId] as number
-    return desc ? bVal - aVal : aVal - bVal
+    const aVal = scores?.get(a.id) ?? a[colId] as number
+    const bVal = scores?.get(b.id) ?? b[colId] as number
+    return (desc ? bVal - aVal : aVal - bVal)
+      || (Number.isSafeInteger(a.id) && Number.isSafeInteger(b.id) ? tieOrder.compareIndices(a.id, b.id) : 0)
   })
 }
 

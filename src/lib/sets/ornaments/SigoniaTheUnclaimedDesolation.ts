@@ -55,9 +55,14 @@ const conditionals: SetConditionals = {
     basicP2(WgslStatName.CR, 0.04, SigoniaTheUnclaimedDesolation),
   ],
   gpu: (action: OptimizerAction, context: OptimizerContext) => `
-    if (ornament2p(*p_sets, SET_SigoniaTheUnclaimedDesolation)) {
-      ${buff.action(AKey.CD, `0.04 * f32(setConditionals.valueSigoniaTheUnclaimedDesolation)`).wgsl(action, 2)}
-    }
+    // Keep the match in the numeric expression. On some multi-cycle GPU kernels,
+    // branching around this add produces incorrect scores with a 0.16 basic-set CD bonus.
+    ${
+    buff.action(
+      AKey.CD,
+      `0.04 * f32(setConditionals.valueSigoniaTheUnclaimedDesolation) * f32(ornament2p(*p_sets, SET_SigoniaTheUnclaimedDesolation))`,
+    ).wgsl(action, 2)
+  }
   `,
 }
 

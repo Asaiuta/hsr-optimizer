@@ -51,15 +51,13 @@ export const OptimizerControlsSection = memo(function OptimizerControlsSection({
       optimizationInProgress: s.optimizationInProgress,
     })),
   )
-  const setOptimizationInProgress = useOptimizerDisplayStore((s) => s.setOptimizationInProgress)
   const computeEngine = useGlobalStore((s) => s.savedSession[SavedSessionKeys.computeEngine])
 
   const [manyPermsModalOpen, setManyPermsModalOpen] = useState(false)
 
   const cancelClicked = useCallback(() => {
-    setOptimizationInProgress(false)
     Optimizer.cancel()
-  }, [setOptimizationInProgress])
+  }, [])
 
   const startClicked = useCallback(() => {
     // Gate on naive index-space size — runtime scales with total iterations, not valid count

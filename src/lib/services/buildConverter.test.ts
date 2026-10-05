@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { Kafka } from 'lib/conditionals/character/1000/Kafka'
 import { Jingliu } from 'lib/conditionals/character/1200/Jingliu'
+import { DEFAULT_TEAM } from 'lib/constants/constants'
 import { ComboType } from 'lib/optimization/rotation/comboType'
 import {
   deserializeBuild,
@@ -9,6 +10,8 @@ import {
   serializeFromCharacterTab,
   serializeFromOptimizer,
 } from 'lib/services/buildConverter'
+import { getTeammates } from 'lib/simulations/orchestrator/runDpsScoreBenchmarkOrchestrator'
+import { getGameMetadata } from 'lib/state/gameMetadata'
 import { Metadata } from 'lib/state/metadataInitializer'
 import {
   createDefaultFormState,
@@ -95,6 +98,15 @@ describe('resolveEidolon', () => {
 })
 
 describe('serializeFromOptimizer', () => {
+  it('keeps a teammate without a cone, while the benchmark refuses an incomplete team', () => {
+    const state = makeOptimizerState({ teammates: [makeTeammate({ lightCone: undefined }), createDefaultTeammate(), createDefaultTeammate()] })
+    const build = serializeFromOptimizer('No cone', Kafka.id, state, TEST_EQUIPPED)
+    expect(build.team[0]?.characterId).toBe(Jingliu.id)
+    const metadata = getGameMetadata().characters[Kafka.id].scoringMetadata.simulation!
+    expect(getTeammates(DEFAULT_TEAM, metadata, metadata, build)).toBeNull()
+    build.team[0]!.lightCone = '21002'
+    expect(getTeammates(DEFAULT_TEAM, metadata, metadata, build)).toHaveLength(1)
+  })
   it('captures all damage-affecting fields with correct names', () => {
     const state = makeOptimizerState({
       characterEidolon: 2,

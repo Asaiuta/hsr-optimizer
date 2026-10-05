@@ -18,7 +18,7 @@ export function bitpackBooleanArray(values: readonly number[]): number[] {
   return result
 }
 
-export function isSetSolutionValid(bitpackedArray: readonly number[], index: number): boolean {
+export function isSetSolutionValid(bitpackedArray: ArrayLike<number>, index: number): boolean {
   const packedIndex = index >>> WORD_SHIFT
   const bitIndex = index & BIT_INDEX_MASK
   return ((bitpackedArray[packedIndex] >> bitIndex) & 1) === 1

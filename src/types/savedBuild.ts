@@ -25,7 +25,8 @@ export type SavedTeammate = {
   teamOrnamentSet: string | undefined,
 }
 
-export type SavedTeammateWithConditionals = SavedTeammate & {
+export type SavedTeammateWithConditionals = Omit<SavedTeammate, 'lightCone'> & {
+  lightCone: LightConeId | undefined,
   characterConditionals: ConditionalValueMap,
   lightConeConditionals: ConditionalValueMap,
 }

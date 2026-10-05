@@ -1,5 +1,9 @@
 import { type FixedSizeNumericMinQueue } from 'lib/dataStructures/fixedSizeMinQueue'
+import type { GpuBufferLease } from 'lib/gpu/webgpuBufferPool'
 import { type WorkgroupEntry } from 'lib/gpu/webgpuDataTransform'
+import type { BoundSearchProgress } from 'lib/optimization/pruning/searchBound'
+import type { Bound } from 'lib/optimization/pruning/shieldBound'
+import type { ResultTieOrder } from 'lib/optimization/resultTieOrder'
 import { type Form } from 'types/form'
 import { type OptimizerContext } from 'types/optimizer'
 import { type Relic } from 'types/relic'
@@ -39,8 +43,13 @@ export type GpuExecutionContext = {
   iterations: number,
   relics: RelicsByPart,
   resultsQueue: FixedSizeNumericMinQueue,
+  tieOrder: ResultTieOrder,
+  shieldBound?: Bound,
+  pruningProgress?: BoundSearchProgress,
   cancelled: boolean,
   computeEngine: string,
+
+  bufferLease: GpuBufferLease,
 
   // Webgpu internal objects
   device: GPUDevice,

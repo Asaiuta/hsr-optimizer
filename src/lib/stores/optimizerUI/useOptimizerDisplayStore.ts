@@ -5,6 +5,7 @@ import type { Simulation } from 'lib/simulations/statSimulationTypes'
 import { StatSimTypes } from 'lib/simulations/statSimulationTypes'
 import { createTabAwareStore } from 'lib/stores/infrastructure/createTabAwareStore'
 import type {
+  OptimizationOutcome,
   OptimizerDisplayState,
   PermutationDetails,
 } from 'lib/stores/optimizerUI/optimizerUITypes'
@@ -66,6 +67,7 @@ const initialState: OptimizerDisplayState = {
   },
   optimizationInProgress: false,
   optimizationId: null,
+  optimizationOutcome: null,
   optimizerRunningEngine: COMPUTE_ENGINE_CPU,
   optimizerStartTime: null,
   optimizerEndTime: null,
@@ -118,4 +120,14 @@ export function ownsOptimizationRun(runId: string | undefined): boolean {
 
 export function isOptimizationRunActive(runId: string | undefined): boolean {
   return useOptimizerDisplayStore.getState().optimizationInProgress && ownsOptimizationRun(runId)
+}
+
+/** Publish terminal state only after results are committed. Ignore stale/settled callbacks. */
+export function finishOptimizationRun(runId: string | undefined, outcome: OptimizationOutcome): void {
+  if (!ownsOptimizationRun(runId) || useOptimizerDisplayStore.getState().optimizationOutcome) return
+  useOptimizerDisplayStore.setState({
+    optimizationInProgress: false,
+    optimizationOutcome: outcome,
+    optimizerEndTime: Date.now(),
+  })
 }

@@ -9,11 +9,13 @@ import { MinQueue } from 'lib/dataStructures/minQueue'
  */
 export class FixedSizeNumericMinQueue {
   private heap: MinQueue
+  private readonly preferSmallKey: boolean
   readonly limit: number
 
-  constructor(limit: number) {
+  constructor(limit: number, preferSmallKey = false) {
     this.limit = limit
-    this.heap = new MinQueue(limit + 1, Float64Array)
+    this.preferSmallKey = preferSmallKey
+    this.heap = new MinQueue(limit + 1, Float64Array, preferSmallKey)
   }
 
   size(): number {
@@ -30,7 +32,10 @@ export class FixedSizeNumericMinQueue {
 
   fixedSizePush(key: number, priority: number): void {
     if (this.heap.length >= this.limit) {
-      if (priority >= this.heap.peekPriority()) {
+      if (
+        priority > this.heap.peekPriority()
+        || (priority === this.heap.peekPriority() && (!this.preferSmallKey || key < this.heap.peekKey()))
+      ) {
         this.heap.pop()
         this.heap.push(key, priority)
       }
