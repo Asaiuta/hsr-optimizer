@@ -7,6 +7,10 @@ on:
 
 jobs:
   build:
+    # Publishes to starrailoptimizer/starrailoptimizer.github.io with a deploy key
+    # that only upstream holds. Skip it anywhere else, otherwise every push to
+    # main in a fork would fail here.
+    if: github.repository == 'fribbels/hsr-optimizer'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
