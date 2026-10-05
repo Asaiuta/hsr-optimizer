@@ -35,7 +35,7 @@ git clone --filter=blob:none https://github.com/fribbels/hsr-optimizer.git
 
 ## AI automation (fork addition)
 
-A structured browser API plus an MCP stdio bridge that drives the existing optimizer engine from an AI session: save and scan import, inventory lookup, simulation, CPU/GPU search, build and batch management, in-optimizer equipment swaps and candidate allocation. Setup, the tool list and the client config live in [docs/dev/ai-automation.md](docs/dev/ai-automation.md) (written in Chinese).
+A structured browser API plus an MCP stdio bridge that drives the existing optimizer engine from an AI session: save and scan import, inventory lookup, simulation, CPU/GPU search, build and batch management, in-optimizer equipment swaps and candidate allocation. The robot icon in the header opens a live AI activity panel showing each call's status, timing and payload, and can pull the AI session's save into the page. Setup, the tool list and the client config live in [docs/dev/ai-automation.md](docs/dev/ai-automation.md) (written in Chinese).
 
 Requires Node.js 26 (see `.nvmrc`), npm 11 and Chrome or Microsoft Edge. Clone this fork rather than upstream:
 
