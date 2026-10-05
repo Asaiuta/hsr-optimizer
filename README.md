@@ -1,3 +1,5 @@
+> **This is a fork.** [fribbels/hsr-optimizer](https://github.com/fribbels/hsr-optimizer) is upstream and remains the source of truth. This fork adds an AI automation layer on top of the same optimizer engine — see [docs/dev/ai-automation.md](docs/dev/ai-automation.md).
+
 # About
 
 Tools for optimizing your Honkai Star Rail builds, including the Character Optimizer and Relic Scorer.
@@ -27,11 +29,25 @@ features.
 
 See [CONTRIBUTING.md](https://github.com/fribbels/hsr-optimizer/blob/main/CONTRIBUTING.md) for full setup instructions.
 
-This branch also provides a [structured browser API and MCP bridge for AI automation](docs/dev/ai-automation.md).
-
 ```
 git clone --filter=blob:none https://github.com/fribbels/hsr-optimizer.git
 ```
+
+## AI automation (fork addition)
+
+A structured browser API plus an MCP stdio bridge that drives the existing optimizer engine from an AI session: save and scan import, inventory lookup, simulation, CPU/GPU search, build and batch management, in-optimizer equipment swaps and candidate allocation. Setup, the tool list and the client config live in [docs/dev/ai-automation.md](docs/dev/ai-automation.md) (written in Chinese).
+
+Requires Node.js 26 (see `.nvmrc`), npm 11 and Chrome or Microsoft Edge. Clone this fork rather than upstream:
+
+```
+git clone --filter=blob:none https://github.com/Asaiuta/hsr-optimizer.git
+cd hsr-optimizer
+npm ci
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
+```
+
+Then register `scripts/automation-mcp.mts` as an MCP server.
 
 # Credits
 
