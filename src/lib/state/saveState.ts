@@ -72,6 +72,16 @@ export const SaveState = {
     const state: HsrOptimizerSaveFormat = {
       relics: relics.map(({ augmentedStats, ...rest }) => rest) as Relic[],
       characters: characters,
+      ...(scannerState.inventorySource
+        ? {
+          scannerInventory: {
+            source: scannerState.inventorySource,
+            gacha: scannerState.gachaFunds,
+            materials: Object.values(scannerState.materials),
+            lightCones: Object.values(scannerState.lightCones),
+          },
+        }
+        : {}),
       scoringMetadataOverrides: useScoringStore.getState().scoringMetadataOverrides,
       showcasePreferences: useShowcaseTabStore.getState().showcasePreferences,
       optimizerMenuState: useOptimizerDisplayStore.getState().menuState,

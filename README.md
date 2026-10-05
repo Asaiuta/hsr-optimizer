@@ -27,6 +27,8 @@ features.
 
 See [CONTRIBUTING.md](https://github.com/fribbels/hsr-optimizer/blob/main/CONTRIBUTING.md) for full setup instructions.
 
+This branch also provides a [structured browser API and MCP bridge for AI automation](docs/dev/ai-automation.md).
+
 ```
 git clone --filter=blob:none https://github.com/fribbels/hsr-optimizer.git
 ```

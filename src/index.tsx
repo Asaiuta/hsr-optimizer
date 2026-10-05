@@ -1,4 +1,5 @@
 import { App } from 'App'
+import { installAutomation } from 'lib/automation/install'
 import 'lib/i18n/i18n'
 import { Constants } from 'lib/constants/constants'
 import { verifyWebgpuSupport } from 'lib/gpu/webgpuDevice'
@@ -101,6 +102,7 @@ window.__HSR_DEBUG = {
 
 Metadata.initialize()
 SaveState.load(false, false)
+installAutomation()
 
 void verifyWebgpuSupport(false)
 

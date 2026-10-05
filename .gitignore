@@ -165,3 +165,6 @@ goldenSimBuildResults.json
 
 # PR review plans
 /plans/
+
+# one-off performance investigation workspaces (evidence stays local)
+/scripts/*/

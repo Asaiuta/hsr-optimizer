@@ -49,6 +49,7 @@ import {
 import { pruneOverridesOnLoad } from 'lib/stores/scoring/scoringDelta'
 import { useScoringStore } from 'lib/stores/scoring/scoringStore'
 import { useCharacterTabStore } from 'lib/tabs/tabCharacters/useCharacterTabStore'
+import { usePrivateScannerState } from 'lib/tabs/tabImport/scannerStore'
 import { useScannerState } from 'lib/tabs/tabImport/ScannerWebsocketClient'
 import { OptimizerMenuIds } from 'lib/tabs/tabOptimizer/optimizerForm/layout/optimizerMenuIds'
 import { useRelicLocatorStore } from 'lib/tabs/tabRelics/RelicLocator'
@@ -211,6 +212,13 @@ export function loadSaveData(saveData: HsrOptimizerSaveFormat, autosave = true, 
 
   useRelicStore.getState().setRelics(saveData.relics)
   useCharacterStore.getState().setCharacters(saveData.characters)
+  const inventory = saveData.scannerInventory
+  usePrivateScannerState.setState({
+    inventorySource: inventory?.source ?? null,
+    gachaFunds: inventory?.gacha ?? null,
+    materials: Object.fromEntries((inventory?.materials ?? []).map((material) => [material.id, material])),
+    lightCones: Object.fromEntries((inventory?.lightCones ?? []).map((cone) => [cone._uid, cone])),
+  })
 
   // Clear stale focusCharacter — the previous focus may not exist in the new data
   useCharacterTabStore.getState().setFocusCharacter(null)

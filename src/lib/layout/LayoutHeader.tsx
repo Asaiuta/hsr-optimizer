@@ -6,6 +6,7 @@ import {
   IconMenu2,
   IconX,
 } from '@tabler/icons-react'
+import { AiActivityButton } from 'lib/automation/AiActivity'
 import { SavedSessionKeys } from 'lib/constants/constantsSession'
 import {
   OpenCloseIDs,
@@ -65,6 +66,7 @@ export function LayoutHeader() {
           </a>
         </Flex>
         <Flex align='center' gap={6}>
+          <AiActivityButton />
           <a href='https://discord.gg/rDmB4Un7qg' target='_blank' rel='noreferrer'>
             <img src={Assets.getDiscord()} style={{ height: 32, borderRadius: 5, display: 'block' }} />
           </a>

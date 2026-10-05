@@ -195,3 +195,16 @@ ShortDMGTypes:
   Break: Break DMG
   CV: CV
 CurrentVersion: 'Current version: ({{Version}})'
+AiActivityButtonTooltip: AI automation activity
+AiActivityTitle: AI automation feed
+AiActivityLive: Live
+AiActivityOffline: Relay offline
+AiActivityOfflineHint: 'Start an AI session through MCP (scripts/automation-mcp.mts) — its operations will stream here, and its imported data can be synced to this page.'
+AiActivityEmpty: No AI operations yet
+AiActivityInput: Input
+AiActivityResult: Result
+AiActivitySync: Sync AI session data to this page
+AiActivitySyncTitle: Sync AI session data
+AiActivitySyncConfirm: 'Replace this page''s save with the AI session data ({{characters}} characters, {{relics}} relics)? The current page save will be overwritten.'
+AiActivitySyncDone: AI session data synced to this page
+AiActivitySyncUnavailable: Could not fetch AI session data

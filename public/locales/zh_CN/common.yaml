@@ -195,3 +195,16 @@ ShortDMGTypes:
   Break: 击破伤害
   CV: 暴击值
 CurrentVersion: '当前版本: ({{Version}})'
+AiActivityButtonTooltip: AI 自动化动态
+AiActivityTitle: AI 自动化动态
+AiActivityLive: 直播中
+AiActivityOffline: 中继未连接
+AiActivityOfflineHint: '通过 MCP 启动 AI 会话(scripts/automation-mcp.mts)后,自动化操作会实时显示在这里,也可以把 AI 会话的数据同步到本页。'
+AiActivityEmpty: 暂无 AI 操作记录
+AiActivityInput: 输入
+AiActivityResult: 结果
+AiActivitySync: 把 AI 会话数据同步到本页
+AiActivitySyncTitle: 同步 AI 会话数据
+AiActivitySyncConfirm: '将用 AI 会话的数据替换本页当前存档({{characters}} 个角色、{{relics}} 件遗器),本页现有存档会被覆盖。'
+AiActivitySyncDone: 已把 AI 会话数据同步到本页
+AiActivitySyncUnavailable: 无法获取 AI 会话数据

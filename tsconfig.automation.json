@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": "./.tsbuildinfo.automation",
+    "types": ["node", "@webgpu/types"]
+  },
+  "include": [
+    "scripts/*.mts",
+    "scripts/automation-headless.ts",
+    "scripts/benchmark-headless-worker.ts",
+    "scripts/benchmark-core.ts",
+    "scripts/benchmark-scoring.ts",
+    "scripts/benchmark-real-core.ts",
+    "scripts/benchmark-default-plan.ts",
+    "src/types",
+    "tests/Automation",
+    "tests/Gpu",
+    "tests/gpu.config.ts",
+    "tests/gpu.vite.config.ts",
+    "tests/automation.config.ts",
+    "vite.headless.config.ts"
+  ],
+  "exclude": ["node_modules"]
+}

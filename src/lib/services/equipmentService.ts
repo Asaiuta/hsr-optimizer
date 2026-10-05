@@ -19,6 +19,36 @@ import type {
   RelicId,
 } from 'types/relic'
 
+/** Apply prevalidated full builds in O(inventory + assignments), independent of the UI swap preference. */
+export function applyRelicAssignments(assignments: { characterId: CharacterId, relicIds: RelicId[] }[]): void {
+  const targets = new Set(assignments.map((assignment) => assignment.characterId))
+  const owners = new Map(assignments.flatMap((assignment) => assignment.relicIds.map((id) => [id, assignment.characterId] as const)))
+  const equipment = new Map(
+    assignments.map((assignment) => [assignment.characterId, Object.fromEntries(assignment.relicIds.map((id) => [getRelicById(id)!.part, id]))]),
+  )
+  const relics = useRelicStore.getState().relics.map((relic) => {
+    const owner = owners.get(relic.id) ?? (relic.equippedBy && targets.has(relic.equippedBy) ? undefined : relic.equippedBy)
+    return owner === relic.equippedBy ? relic : { ...relic, equippedBy: owner }
+  })
+  const characters = useCharacterStore.getState().characters.map((character) => {
+    const assigned = equipment.get(character.id)
+    if (assigned) return { ...character, equipped: assigned }
+    const changed = Object.values(character.equipped).some((id) => id && owners.has(id))
+    return changed
+      ? {
+        ...character,
+        equipped: Object.fromEntries(
+          Object.entries(character.equipped)
+            .map(([part, id]) => [part, id && owners.has(id) ? undefined : id]),
+        ),
+      }
+      : character
+  })
+  useRelicStore.getState().setRelics(relics)
+  useCharacterStore.getState().setCharacters(characters)
+  debounceEffect('refreshRelics', 500, () => gridStore.relicsGridApi()?.refreshCells())
+}
+
 function getSwapSetting(): boolean {
   return useGlobalStore.getState().settings.RelicEquippingBehavior === SettingOptions.RelicEquippingBehavior.Swap
 }

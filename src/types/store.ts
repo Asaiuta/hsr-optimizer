@@ -2,6 +2,11 @@ import type { ShowcasePreset } from 'lib/characterPreview/debugVisualConfigStore
 import type {
   ComputeEngine,
 } from 'lib/constants/constants'
+import type {
+  V4ParserGachaFunds,
+  V4ParserLightCone,
+  V4ParserMaterial,
+} from 'lib/importer/kelzFormatParser'
 import type { ScoringType } from 'lib/scoring/scoringConfig'
 import type { AhaForm } from 'lib/stores/ahaTuningStore'
 import type { AppPages } from 'lib/tabs/navigation/constants'
@@ -91,6 +96,12 @@ export type UserSettings = {
 export type HsrOptimizerSaveFormat = {
   relics: Relic[],
   characters: Character[],
+  scannerInventory?: {
+    source: string,
+    gacha: V4ParserGachaFunds | null,
+    materials: V4ParserMaterial[],
+    lightCones: V4ParserLightCone[],
+  },
   scoringMetadataOverrides?: Record<string, ScoringMetadataOverride>,
   showcasePreferences?: Record<string, ShowcasePreferences>,
   optimizerMenuState?: OptimizerMenuState,

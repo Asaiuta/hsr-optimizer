@@ -12,6 +12,15 @@
     "yarn": ">=999.0.0"
   },
   "scripts": {
+    "automation:benchmark": "node scripts/benchmark-headless.mts",
+    "automation:headless:build": "vite build --config vite.headless.config.ts --configLoader native",
+    "preautomation:test": "npm run automation:headless:build",
+    "automation:mcp": "node scripts/automation-mcp.mts",
+    "automation:typecheck": "tsgo --noEmit -p tsconfig.automation.json",
+    "automation:scanner:test": "node --test scripts/scanner-tests.mts",
+    "automation:test": "playwright test --config tests/automation.config.ts",
+    "pregpu:test": "vite build --config tests/gpu.vite.config.ts --configLoader native",
+    "gpu:test": "playwright test --config tests/gpu.config.ts",
     "postinstall": "patch-package",
     "start": "vite",
     "start:mobile": "vite --host",
@@ -67,9 +76,11 @@
     "react-i18next": "^17.0.7",
     "react-selecto": "^1.26.3",
     "recharts": "^3.8.1",
+    "zod": "4.6.5",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@playwright/test": "^1.59.1",
     "@types/chroma-js": "^3.1.2",
     "@types/js-yaml": "^4.0.9",

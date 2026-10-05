@@ -24,6 +24,7 @@ import type { CharacterId } from 'types/character'
 import type { Form } from 'types/form'
 
 type ScannerState = {
+  inventorySource: string | null,
   // The websocket url to connect to
   websocketUrl: string,
 
@@ -134,6 +135,7 @@ export type ScannerStore =
 export const DEFAULT_WEBSOCKET_URL = 'ws://127.0.0.1:23313/ws'
 
 export const usePrivateScannerState = createTabAwareStore<ScannerStore>((set, get) => ({
+  inventorySource: null,
   websocketUrl: DEFAULT_WEBSOCKET_URL,
 
   connected: false,
@@ -230,6 +232,7 @@ export const usePrivateScannerState = createTabAwareStore<ScannerStore>((set, ge
   setConnected: (connected: boolean) =>
     set({
       connected,
+      inventorySource: null,
 
       /* always reset state when connection status changes */
       recentRelics: [],
@@ -245,6 +248,7 @@ export const usePrivateScannerState = createTabAwareStore<ScannerStore>((set, ge
 
   updateInitialScan: (data: ScannerParserJson) =>
     set({
+      inventorySource: data.source,
       lastScanData: data,
 
       recentRelics: data.relics

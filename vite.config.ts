@@ -1,6 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+import {
+  join,
+  resolve,
+} from 'node:path'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 
@@ -55,6 +58,8 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            // Keep automation validation out of the eagerly preloaded vendor bundle.
+            { name: 'automation-schema', test: /node_modules[\\/](zod)[\\/]/, priority: 20 },
             { name: 'react-vendor', test: /node_modules[\\/](react|react-dom)[\\/]/, priority: 20 },
             { name: 'ag-grid', test: /node_modules[\\/]ag-grid/, priority: 15 },
             { name: 'recharts', test: /node_modules[\\/](recharts|d3-)/, priority: 15 },
